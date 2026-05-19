@@ -1,12 +1,12 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
-import { OAUTH_SCOPE } from "@workspace-viewer/protocol";
+import { OAUTH_SCOPE, unpairAgentRequestSchema, unpairAgentResponseSchema } from "@workspace-viewer/protocol";
 import type { OAuthProps } from "./auth.js";
 import type { Env } from "./env.js";
 import { handleMcp } from "./mcp.js";
 import { handleAuthorize, handleGitHubCallback } from "./oauth.js";
 import { completeAgentPairing } from "./pairing.js";
-import { getAgent, touchAgent } from "./repository.js";
+import { getAgent, revokeAgent, touchAgent } from "./repository.js";
 import { verifyAgentToken } from "./crypto.js";
 export { AgentSession } from "./session.js";
 
@@ -38,6 +38,10 @@ const defaultHandler: ExportedHandler<Env> = {
 
     if (url.pathname === "/agent/pair/complete") {
       return completeAgentPairing(request, env);
+    }
+
+    if (url.pathname === "/agent/unpair") {
+      return unpairAgent(request, env);
     }
 
     if (url.pathname === "/mcp") {
@@ -105,4 +109,25 @@ async function connectAgent(request: Request, env: Env): Promise<Response> {
 
   const stub = env.AGENT_SESSION.getByName(agentId);
   return stub.fetch(request);
+}
+
+async function unpairAgent(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+
+  const input = unpairAgentRequestSchema.parse(await request.json());
+  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!token) {
+    return new Response("agent token is required", { status: 401 });
+  }
+
+  const agent = await getAgent(env.DB, input.agentId);
+  if (!agent || !(await verifyAgentToken(token, agent.token_hash))) {
+    return new Response("Invalid agent credentials", { status: 403 });
+  }
+
+  await env.AGENT_SESSION.getByName(input.agentId).disconnect("Agent was unpaired");
+  await revokeAgent(env.DB, input.agentId);
+  return Response.json(unpairAgentResponseSchema.parse({ ok: true }));
 }

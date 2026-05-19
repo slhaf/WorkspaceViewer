@@ -47,9 +47,15 @@ https://<worker-domain>/callback/github
 After ChatGPT calls `createAgentPairingCode`, pair the local Agent:
 
 ```bash
-workspace-viewer-agent login ABCD-EFGH --server https://<worker-domain>
+workspace-viewer-agent pair ABCD-EFGH
 workspace-viewer-agent workspace add --name WorkspaceViewer --path /home/slhaf/Documents/Projects/WorkspaceViewer
 workspace-viewer-agent run
+```
+
+To revoke the Agent credentials while keeping local workspace entries:
+
+```bash
+workspace-viewer-agent unpair
 ```
 
 The Agent stores local credentials in `~/.workspace-viewer/config.json`. Workspace root paths remain local-only; the Agent syncs only workspace summaries to D1 after WebSocket connect.
@@ -61,7 +67,7 @@ Example config:
   "agent": {
     "agentId": "agent_dev",
     "agentToken": "dev-agent-token",
-    "serverBaseUrl": "http://localhost:8787"
+    "serverBaseUrl": "https://workspace-viewer.slhafzjw-workspace-viewer.workers.dev/mcp"
   },
   "workspaces": []
 }

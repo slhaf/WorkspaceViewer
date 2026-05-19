@@ -8,7 +8,7 @@ import {
   type AgentToolResultHeader,
   workspaceError
 } from "@workspace-viewer/protocol";
-import type { AgentConfig } from "./config.js";
+import type { PairedAgentConfig } from "./config.js";
 import { executeTool } from "./tools.js";
 import { toWorkspaceError } from "./errors.js";
 import { gzipJson } from "./utils.js";
@@ -18,7 +18,7 @@ export class AgentClient {
   private sendQueue: Promise<void> = Promise.resolve();
   private stopped = false;
 
-  constructor(private readonly config: AgentConfig) {}
+  constructor(private readonly config: PairedAgentConfig) {}
 
   async run(): Promise<void> {
     while (!this.stopped) {

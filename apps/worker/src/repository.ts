@@ -126,6 +126,13 @@ export async function touchAgent(db: D1Database, agentId: string): Promise<void>
     .run();
 }
 
+export async function revokeAgent(db: D1Database, agentId: string): Promise<void> {
+  await db.batch([
+    db.prepare("DELETE FROM workspaces WHERE agent_id = ?").bind(agentId),
+    db.prepare("DELETE FROM agents WHERE agent_id = ?").bind(agentId)
+  ]);
+}
+
 export async function replaceAgentWorkspaces(
   db: D1Database,
   agentId: string,

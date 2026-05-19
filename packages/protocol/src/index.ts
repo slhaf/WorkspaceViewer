@@ -343,6 +343,18 @@ export const completeAgentPairingResponseSchema = z.object({
 
 export type CompleteAgentPairingResponse = z.infer<typeof completeAgentPairingResponseSchema>;
 
+export const unpairAgentRequestSchema = z.object({
+  agentId: z.string()
+});
+
+export type UnpairAgentRequest = z.infer<typeof unpairAgentRequestSchema>;
+
+export const unpairAgentResponseSchema = z.object({
+  ok: z.literal(true)
+});
+
+export type UnpairAgentResponse = z.infer<typeof unpairAgentResponseSchema>;
+
 export interface DispatchRequest {
   requestId: string;
   userId: string;

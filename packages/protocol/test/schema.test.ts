@@ -6,6 +6,8 @@ import {
   listTreeInputSchema,
   OAUTH_SCOPE,
   searchFileInputSchema,
+  unpairAgentRequestSchema,
+  unpairAgentResponseSchema,
   workspaceToolErrorSchema
 } from "../src/index.js";
 
@@ -63,7 +65,9 @@ describe("protocol schemas", () => {
     expect(createAgentPairingCodeResultSchema.parse({
       pairingCode: "ABCD-EFGH",
       expiresAt: "2026-05-20T12:34:56.000Z",
-      commandHint: "workspace-viewer-agent login ABCD-EFGH --server https://example.com"
+      commandHint: "workspace-viewer-agent pair ABCD-EFGH"
     }).pairingCode).toBe("ABCD-EFGH");
+    expect(unpairAgentRequestSchema.parse({ agentId: "agent_test" }).agentId).toBe("agent_test");
+    expect(unpairAgentResponseSchema.parse({ ok: true }).ok).toBe(true);
   });
 });

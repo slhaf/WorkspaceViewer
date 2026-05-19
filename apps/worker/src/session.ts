@@ -69,6 +69,14 @@ export class AgentSession extends DurableObject<Env> {
     return this.getAgentSocket() !== null;
   }
 
+  async disconnect(reason = "Agent was unpaired"): Promise<void> {
+    this.pendingBinary = null;
+    this.failAll("AGENT_OFFLINE", reason);
+    for (const ws of this.ctx.getWebSockets("agent")) {
+      ws.close(4001, reason);
+    }
+  }
+
   async dispatch(request: DispatchRequest): Promise<DispatchResponse> {
     const ws = this.getAgentSocket();
     if (!ws) {

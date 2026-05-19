@@ -21,4 +21,21 @@ describe("agent config", () => {
     expect(loaded.workspaces).toEqual([]);
     expect(await readFile(configPath, "utf8")).toContain("agent_test");
   });
+
+  it("allows workspace config before pairing", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "workspace-viewer-config-"));
+    const configPath = path.join(dir, "config.json");
+    await saveConfig({
+      workspaces: [{
+        workspaceId: "ws_test",
+        displayName: "Test",
+        rootPath: dir,
+        accessMode: "read_only"
+      }]
+    }, configPath);
+
+    const loaded = await loadConfig(configPath);
+    expect(loaded.agent).toBeUndefined();
+    expect(loaded.workspaces[0]?.workspaceId).toBe("ws_test");
+  });
 });

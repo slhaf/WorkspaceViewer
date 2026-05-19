@@ -17,11 +17,12 @@ const agentConfigSchema = z.object({
     agentId: z.string(),
     agentToken: z.string(),
     serverBaseUrl: z.string().url()
-  }),
+  }).optional(),
   workspaces: z.array(workspaceConfigSchema)
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
+export type PairedAgentConfig = AgentConfig & { agent: NonNullable<AgentConfig["agent"]> };
 export type WorkspaceConfig = z.infer<typeof workspaceConfigSchema>;
 
 export function defaultConfigPath(): string {

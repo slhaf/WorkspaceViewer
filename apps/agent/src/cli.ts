@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import { completeAgentPairingResponseSchema } from "@workspace-viewer/protocol";
+import { pathToFileURL } from "node:url";
+import { completeAgentPairingResponseSchema, unpairAgentResponseSchema } from "@workspace-viewer/protocol";
 import { AgentClient } from "./client.js";
 import {
   type AgentConfig,
@@ -11,14 +12,19 @@ import {
   saveConfig
 } from "./config.js";
 
+export const WORKSPACE_VIEWER_MCP_URL = "https://workspace-viewer.slhafzjw-workspace-viewer.workers.dev/mcp";
+
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
   switch (command) {
     case "run":
       await runAgent(args);
       return;
-    case "login":
-      await login(args);
+    case "pair":
+      await pair(args);
+      return;
+    case "unpair":
+      await unpair(args);
       return;
     case "workspace":
       await workspace(args);
@@ -32,25 +38,30 @@ async function main(): Promise<void> {
 async function runAgent(args: string[]): Promise<void> {
   const configPath = option(args, "--config") ?? defaultConfigPath();
   const config = await loadConfig(configPath);
-  const client = new AgentClient(config);
+  if (!config.agent) {
+    throw new Error("Agent is not paired. Run `workspace-viewer-agent pair <pairing-code>` first.");
+  }
+  const client = new AgentClient({ ...config, agent: config.agent });
   process.on("SIGINT", () => client.stop());
   process.on("SIGTERM", () => client.stop());
   await client.run();
 }
 
-async function login(args: string[]): Promise<void> {
+type Fetch = typeof fetch;
+type Log = (message: string) => void;
+
+export async function pair(args: string[], fetchFn: Fetch = fetch, log: Log = console.log): Promise<void> {
   const pairingCode = firstPositional(args);
-  const server = option(args, "--server");
   const configPath = option(args, "--config") ?? defaultConfigPath();
   const displayName = option(args, "--name");
-  if (!pairingCode || !server) {
-    console.error("Usage: workspace-viewer-agent login <pairing-code> --server <url> [--config <path>] [--name <display>]");
+  if (!pairingCode || args.includes("--server")) {
+    console.error("Usage: workspace-viewer-agent pair <pairing-code> [--config <path>] [--name <display>]");
     process.exitCode = 2;
     return;
   }
 
   const existing = await loadConfigIfExists(configPath);
-  const response = await fetch(new URL("/agent/pair/complete", server), {
+  const response = await fetchFn(new URL("/agent/pair/complete", WORKSPACE_VIEWER_MCP_URL), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -74,11 +85,34 @@ async function login(args: string[]): Promise<void> {
     agent: {
       agentId: paired.agentId,
       agentToken: paired.agentToken,
-      serverBaseUrl: paired.serverBaseUrl
+      serverBaseUrl: WORKSPACE_VIEWER_MCP_URL
     },
     workspaces: existing?.workspaces ?? []
   }, configPath);
-  console.log(`Agent paired: ${paired.agentId}`);
+  log(`Agent paired: ${paired.agentId}`);
+}
+
+export async function unpair(args: string[], fetchFn: Fetch = fetch, log: Log = console.log): Promise<void> {
+  const configPath = option(args, "--config") ?? defaultConfigPath();
+  const config = await loadConfig(configPath);
+  if (!config.agent) {
+    throw new Error("Agent is not paired.");
+  }
+
+  const response = await fetchFn(new URL("/agent/unpair", config.agent.serverBaseUrl), {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.agent.agentToken}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ agentId: config.agent.agentId })
+  });
+  if (!response.ok) {
+    throw new Error(`Unpair failed: ${response.status} ${await response.text()}`);
+  }
+  unpairAgentResponseSchema.parse(await response.json());
+  await saveConfig({ workspaces: config.workspaces }, configPath);
+  log(`Agent unpaired: ${config.agent.agentId}`);
 }
 
 async function workspace(args: string[]): Promise<void> {
@@ -355,7 +389,8 @@ function usage(): void {
   console.error([
     "Usage:",
     "  workspace-viewer-agent run [--config <path>]",
-    "  workspace-viewer-agent login <pairing-code> --server <url> [--config <path>] [--name <display>]",
+    "  workspace-viewer-agent pair <pairing-code> [--config <path>] [--name <display>]",
+    "  workspace-viewer-agent unpair [--config <path>]",
     "  workspace-viewer-agent workspace list [--config <path>]",
     "  workspace-viewer-agent workspace add --name <name> --path <path> [--config <path>] [--ignore <pattern>]",
     "  workspace-viewer-agent workspace remove <workspace-id> [--config <path>]",
@@ -365,7 +400,9 @@ function usage(): void {
   ].join("\n"));
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

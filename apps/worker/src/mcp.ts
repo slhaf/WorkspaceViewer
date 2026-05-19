@@ -308,11 +308,10 @@ async function callTool(env: Env, userId: string, name: string, args: unknown): 
     const pairingCode = await createUniquePairingCode(env.DB);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     await createPairingSession(env.DB, pairingCode, userId, input.agentDisplayName, expiresAt);
-    const serverBaseUrl = getPublicBaseUrl(env);
     return resultSchemas.createAgentPairingCode.parse({
       pairingCode,
       expiresAt,
-      commandHint: `workspace-viewer-agent login ${pairingCode} --server ${serverBaseUrl}`
+      commandHint: `workspace-viewer-agent pair ${pairingCode}`
     });
   }
 
@@ -447,11 +446,6 @@ function pairingCode(): string {
   crypto.getRandomValues(bytes);
   const chars = [...bytes].map((byte) => alphabet[byte % alphabet.length]);
   return `${chars.slice(0, 4).join("")}-${chars.slice(4).join("")}`;
-}
-
-function getPublicBaseUrl(env: Env): string {
-  if (!env.PUBLIC_BASE_URL) throw new Error("PUBLIC_BASE_URL is not configured");
-  return env.PUBLIC_BASE_URL.replace(/\/$/, "");
 }
 
 function zObject(value: unknown): Record<string, unknown> {
