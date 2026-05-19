@@ -24,6 +24,8 @@ interface JsonRpcRequest {
   params?: unknown;
 }
 
+type JsonSchema = Record<string, unknown>;
+
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26"] as const;
 const DEFAULT_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 
@@ -37,16 +39,75 @@ const toolDescriptions: Record<string, string> = {
   batchExec: "Use this when you need to run several read-only workspace inspections in one call."
 };
 
+const toolInputSchemas: Record<string, JsonSchema> = {
+  listWorkspaces: objectSchema({
+    includeOffline: { type: "boolean" }
+  }),
+  createAgentPairingCode: objectSchema({
+    agentDisplayName: { type: "string", minLength: 1, maxLength: 100 }
+  }),
+  describeWorkspace: objectSchema({
+    workspaceId: { type: "string" }
+  }, ["workspaceId"]),
+  listTree: objectSchema({
+    workspaceId: { type: "string" },
+    path: { type: "string" },
+    depth: { type: "integer", minimum: 0, maximum: LIMITS.listTree.maxDepth },
+    includeFiles: { type: "boolean" }
+  }, ["workspaceId"]),
+  inspectFile: objectSchema({
+    workspaceId: { type: "string" },
+    path: { type: "string" },
+    startLine: { type: "integer", minimum: 1 },
+    endLine: { type: "integer", minimum: 1 }
+  }, ["workspaceId", "path"]),
+  searchFile: objectSchema({
+    workspaceId: { type: "string" },
+    mode: { type: "string", enum: ["path", "content"] },
+    query: { type: "string", minLength: 1, maxLength: LIMITS.searchFile.maxQueryLength },
+    pathPrefix: { type: "string" },
+    fileGlob: { type: "array", items: { type: "string" } },
+    maxResults: { type: "integer", minimum: 1, maximum: LIMITS.searchFile.maxResults },
+    contextLines: { type: "integer", minimum: 0, maximum: LIMITS.searchFile.maxContextLines }
+  }, ["workspaceId", "mode", "query"]),
+  batchExec: objectSchema({
+    workspaceId: { type: "string" },
+    operations: {
+      type: "array",
+      minItems: 1,
+      maxItems: LIMITS.batchExec.maxOperations,
+      items: {
+        oneOf: [
+          batchOperationSchema("describeWorkspace", objectSchema()),
+          batchOperationSchema("listTree", objectSchema({
+            path: { type: "string" },
+            depth: { type: "integer", minimum: 0, maximum: LIMITS.listTree.maxDepth },
+            includeFiles: { type: "boolean" }
+          })),
+          batchOperationSchema("inspectFile", objectSchema({
+            path: { type: "string" },
+            startLine: { type: "integer", minimum: 1 },
+            endLine: { type: "integer", minimum: 1 }
+          }, ["path"])),
+          batchOperationSchema("searchFile", objectSchema({
+            mode: { type: "string", enum: ["path", "content"] },
+            query: { type: "string", minLength: 1, maxLength: LIMITS.searchFile.maxQueryLength },
+            pathPrefix: { type: "string" },
+            fileGlob: { type: "array", items: { type: "string" } },
+            maxResults: { type: "integer", minimum: 1, maximum: LIMITS.searchFile.maxResults },
+            contextLines: { type: "integer", minimum: 0, maximum: LIMITS.searchFile.maxContextLines }
+          }, ["mode", "query"]))
+        ]
+      }
+    }
+  }, ["workspaceId", "operations"])
+};
+
 export async function handleMcp(request: Request, env: Env, props?: OAuthProps): Promise<Response> {
   if (request.method === "GET") {
     return Response.json({
       name: "workspace-viewer",
-      tools: Object.entries(toolDescriptions).map(([name, description]) => ({
-        name,
-        description,
-        securitySchemes: securitySchemes(),
-        annotations: toolAnnotations(name)
-      }))
+      tools: Object.entries(toolDescriptions).map(([name, description]) => toolDescriptor(name, description))
     });
   }
 
@@ -68,13 +129,7 @@ export async function handleMcp(request: Request, env: Env, props?: OAuthProps):
 
   if (rpc.method === "tools/list") {
     return rpcResult(rpc.id, {
-      tools: Object.entries(toolDescriptions).map(([name, description]) => ({
-        name,
-        description,
-        inputSchema: { type: "object" },
-        securitySchemes: securitySchemes(),
-        annotations: toolAnnotations(name)
-      }))
+      tools: Object.entries(toolDescriptions).map(([name, description]) => toolDescriptor(name, description))
     });
   }
 
@@ -196,6 +251,39 @@ function initializeResult(params: unknown): {
       version: "0.1.0"
     }
   };
+}
+
+function toolDescriptor(name: string, description: string): {
+  name: string;
+  description: string;
+  inputSchema: JsonSchema;
+  securitySchemes: Array<{ type: "oauth2"; scopes: string[] }>;
+  annotations: { readOnlyHint: boolean; destructiveHint: false; openWorldHint: false };
+} {
+  return {
+    name,
+    description,
+    inputSchema: toolInputSchemas[name] ?? objectSchema(),
+    securitySchemes: securitySchemes(),
+    annotations: toolAnnotations(name)
+  };
+}
+
+function objectSchema(properties: Record<string, JsonSchema> = {}, required: string[] = []): JsonSchema {
+  return {
+    type: "object",
+    properties,
+    ...(required.length > 0 ? { required } : {}),
+    additionalProperties: false
+  };
+}
+
+function batchOperationSchema(tool: string, input: JsonSchema): JsonSchema {
+  return objectSchema({
+    id: { type: "string", minLength: 1 },
+    tool: { type: "string", const: tool },
+    input
+  }, ["id", "tool", "input"]);
 }
 
 function isSupportedProtocolVersion(value: string): value is typeof SUPPORTED_PROTOCOL_VERSIONS[number] {
