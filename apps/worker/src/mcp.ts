@@ -24,6 +24,9 @@ interface JsonRpcRequest {
   params?: unknown;
 }
 
+const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26"] as const;
+const DEFAULT_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
+
 const toolDescriptions: Record<string, string> = {
   listWorkspaces: "Use this when you need to discover the user's registered local workspaces.",
   createAgentPairingCode: "Use this when the user needs to pair a local Workspace Viewer Agent.",
@@ -50,6 +53,18 @@ export async function handleMcp(request: Request, env: Env, props?: OAuthProps):
   const rpc = await request.json<JsonRpcRequest>();
   const auth = await resolveUser(env, request, props);
   if (auth instanceof Response) return rpcAuthError(rpc.id, request, "Authentication required");
+
+  if (rpc.method === "initialize") {
+    return rpcResult(rpc.id, initializeResult(rpc.params));
+  }
+
+  if (rpc.method === "notifications/initialized") {
+    return notificationAccepted();
+  }
+
+  if (rpc.method === "ping") {
+    return rpcResult(rpc.id, {});
+  }
 
   if (rpc.method === "tools/list") {
     return rpcResult(rpc.id, {
@@ -160,6 +175,33 @@ async function callTool(env: Env, userId: string, name: string, args: unknown): 
   return parsed;
 }
 
+function initializeResult(params: unknown): {
+  protocolVersion: string;
+  capabilities: { tools: Record<string, never> };
+  serverInfo: { name: string; title: string; version: string };
+} {
+  const requestedVersion = zObject(params).protocolVersion;
+  const protocolVersion = typeof requestedVersion === "string" && isSupportedProtocolVersion(requestedVersion)
+    ? requestedVersion
+    : DEFAULT_PROTOCOL_VERSION;
+
+  return {
+    protocolVersion,
+    capabilities: {
+      tools: {}
+    },
+    serverInfo: {
+      name: "workspace-viewer",
+      title: "Workspace Viewer",
+      version: "0.1.0"
+    }
+  };
+}
+
+function isSupportedProtocolVersion(value: string): value is typeof SUPPORTED_PROTOCOL_VERSIONS[number] {
+  return SUPPORTED_PROTOCOL_VERSIONS.includes(value as typeof SUPPORTED_PROTOCOL_VERSIONS[number]);
+}
+
 function isAgentToolName(value: string): value is AgentToolName {
   return ["describeWorkspace", "listTree", "inspectFile", "searchFile", "batchExec"].includes(value);
 }
@@ -208,6 +250,10 @@ function rpcResult(id: JsonRpcRequest["id"], result: unknown): Response {
 
 function rpcError(id: JsonRpcRequest["id"], code: number, message: string): Response {
   return Response.json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
+}
+
+function notificationAccepted(): Response {
+  return new Response(null, { status: 202 });
 }
 
 function rpcAuthError(id: JsonRpcRequest["id"], request: Request, description: string): Response {
