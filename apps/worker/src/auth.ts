@@ -48,6 +48,6 @@ export function authenticationRequired(request: Request): Response {
 
 export function oauthChallenge(request: Request): string {
   const url = new URL(request.url);
-  const metadataUrl = `${url.origin}/.well-known/oauth-protected-resource`;
+  const metadataUrl = `${url.origin}/.well-known/oauth-protected-resource/mcp`;
   return `Bearer resource_metadata="${metadataUrl}", scope="${OAUTH_SCOPE}"`;
 }
