@@ -60,6 +60,7 @@ export default {
 
 function oauthProvider(env: Env, request?: Request): OAuthProvider<Env> {
   const baseUrl = publicBaseUrl(env, request);
+  const mcpResourceUrl = `${baseUrl}/mcp`;
   return new OAuthProvider<Env>({
     authorizeEndpoint: `${baseUrl}/authorize`,
     tokenEndpoint: `${baseUrl}/token`,
@@ -70,7 +71,7 @@ function oauthProvider(env: Env, request?: Request): OAuthProvider<Env> {
     scopesSupported: [OAUTH_SCOPE],
     allowPlainPKCE: false,
     resourceMetadata: {
-      resource: baseUrl,
+      resource: mcpResourceUrl,
       authorization_servers: [baseUrl],
       scopes_supported: [OAUTH_SCOPE],
       bearer_methods_supported: ["header"],
