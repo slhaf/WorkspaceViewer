@@ -4,7 +4,7 @@ import { OAUTH_SCOPE, unpairAgentRequestSchema, unpairAgentResponseSchema } from
 import type { OAuthProps } from "./auth.js";
 import type { Env } from "./env.js";
 import { handleMcp } from "./mcp.js";
-import { handleAuthorize, handleGitHubCallback } from "./oauth.js";
+import { handleAuthorize, handleGitHubCallback, handleGitHubLogin, handleReviewerLogin } from "./oauth.js";
 import { completeAgentPairing } from "./pairing.js";
 import { getAgent, revokeAgent, touchAgent } from "./repository.js";
 import { verifyAgentToken } from "./crypto.js";
@@ -30,6 +30,14 @@ const defaultHandler: ExportedHandler<Env> = {
 
     if (url.pathname === "/authorize") {
       return handleAuthorize(request, env);
+    }
+
+    if (url.pathname === "/login/github") {
+      return handleGitHubLogin(request, env);
+    }
+
+    if (url.pathname === "/login/reviewer") {
+      return handleReviewerLogin(request, env);
     }
 
     if (url.pathname === "/callback/github") {

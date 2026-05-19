@@ -1,8 +1,8 @@
 import type { AuthRequest } from "@cloudflare/workers-oauth-provider";
 import { OAUTH_SCOPE } from "@workspace-viewer/protocol";
 import type { Env } from "./env.js";
-import { bootstrapDevWorkspaceForUser, getUser, upsertGitHubUser } from "./repository.js";
-import { signValue, verifySignedValue } from "./crypto.js";
+import { bootstrapDevWorkspaceForUser, getUser, upsertGitHubUser, upsertReviewerUser } from "./repository.js";
+import { signValue, verifyPasswordHash, verifySignedValue } from "./crypto.js";
 
 const STATE_TTL_SECONDS = 10 * 60;
 const OAUTH_STATE_COOKIE = "__Host-WV_OAUTH_STATE";
@@ -42,6 +42,26 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
     expirationTtl: STATE_TTL_SECONDS
   });
 
+  return new Response(renderLoginPage(request, env, state), {
+    status: 200,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "set-cookie": `${OAUTH_STATE_COOKIE}=${await signValue(state, env.OAUTH_COOKIE_SECRET)}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=${STATE_TTL_SECONDS}`
+    }
+  });
+}
+
+export async function handleGitHubLogin(request: Request, env: Env): Promise<Response> {
+  assertOAuthConfig(env);
+  const state = new URL(request.url).searchParams.get("state");
+  if (!state) {
+    return new Response("Missing OAuth state", { status: 400 });
+  }
+
+  const storedRaw = await loadStoredOAuthState(request, env, state);
+  if (storedRaw instanceof Response) return storedRaw;
+
   const redirect = new URL("https://github.com/login/oauth/authorize");
   redirect.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
   redirect.searchParams.set("redirect_uri", callbackUrl(request, env));
@@ -51,8 +71,75 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
   return new Response(null, {
     status: 302,
     headers: {
-      location: redirect.toString(),
-      "set-cookie": `${OAUTH_STATE_COOKIE}=${await signValue(state, env.OAUTH_COOKIE_SECRET)}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=${STATE_TTL_SECONDS}`
+      location: redirect.toString()
+    }
+  });
+}
+
+export async function handleReviewerLogin(request: Request, env: Env): Promise<Response> {
+  assertOAuthConfig(env);
+  if (request.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+  if (env.REVIEW_LOGIN_ENABLED !== "true") {
+    return new Response("Reviewer login is disabled", { status: 404 });
+  }
+  if (!env.REVIEW_EMAIL || !env.REVIEW_PASSWORD_HASH) {
+    return new Response("Reviewer login is not configured", { status: 500 });
+  }
+
+  const form = await request.formData();
+  const email = form.get("email");
+  const password = form.get("password");
+  const state = form.get("state");
+  if (typeof email !== "string" || typeof password !== "string" || typeof state !== "string" || !state) {
+    return new Response("Missing reviewer credentials or state", { status: 400 });
+  }
+
+  const storedRaw = await loadStoredOAuthState(request, env, state);
+  if (storedRaw instanceof Response) return storedRaw;
+
+  const configuredEmail = env.REVIEW_EMAIL.trim().toLowerCase();
+  const submittedEmail = email.trim().toLowerCase();
+  if (submittedEmail !== configuredEmail || !(await verifyPasswordHash(password, env.REVIEW_PASSWORD_HASH))) {
+    return new Response("Invalid reviewer credentials", { status: 401 });
+  }
+
+  const stored = JSON.parse(storedRaw) as StoredOAuthState;
+  const providerSubject = env.REVIEW_PROVIDER_SUBJECT ?? "openai-review";
+  const user = await upsertReviewerUser(env.DB, {
+    providerSubject,
+    email: env.REVIEW_EMAIL
+  });
+  if (user.status !== "active") {
+    return new Response("User is suspended", {
+      status: 403,
+      headers: clearStateCookie()
+    });
+  }
+
+  const current = await getUser(env.DB, user.user_id);
+  if (!current || current.status !== "active") {
+    return new Response("User is suspended", {
+      status: 403,
+      headers: clearStateCookie()
+    });
+  }
+
+  const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
+    request: stored.request,
+    userId: user.user_id,
+    metadata: { provider: "reviewer", login: "openai-review" },
+    scope: [OAUTH_SCOPE],
+    props: { userId: user.user_id }
+  });
+
+  await env.OAUTH_KV.delete(oauthStateKey(state));
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: redirectTo,
+      ...clearStateCookie()
     }
   });
 }
@@ -186,8 +273,85 @@ function callbackUrl(request: Request, env: Env): string {
   return `${base.replace(/\/$/, "")}/callback/github`;
 }
 
+async function loadStoredOAuthState(request: Request, env: Env, state: string): Promise<string | Response> {
+  const signedCookie = readCookie(request, OAUTH_STATE_COOKIE);
+  const cookieState = signedCookie ? await verifySignedValue(signedCookie, env.OAUTH_COOKIE_SECRET ?? "") : null;
+  if (cookieState !== state) {
+    return new Response("Invalid OAuth state", { status: 400 });
+  }
+
+  const storedRaw = await env.OAUTH_KV.get(oauthStateKey(state));
+  if (!storedRaw) {
+    return new Response("OAuth state expired", { status: 400 });
+  }
+  return storedRaw;
+}
+
 function oauthStateKey(state: string): string {
   return `github_oauth_state:${state}`;
+}
+
+function renderLoginPage(request: Request, env: Env, state: string): string {
+  const githubUrl = new URL("/login/github", new URL(request.url).origin);
+  githubUrl.searchParams.set("state", state);
+  const reviewerEnabled = env.REVIEW_LOGIN_ENABLED === "true";
+  const reviewerForm = reviewerEnabled
+    ? `<section>
+        <h2>Reviewer sign in</h2>
+        <form method="post" action="/login/reviewer">
+          <input type="hidden" name="state" value="${escapeHtml(state)}">
+          <label>
+            Email
+            <input name="email" type="email" autocomplete="username" required>
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button type="submit">Sign in</button>
+        </form>
+      </section>`
+    : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workspace Viewer Sign In</title>
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; background: #f6f7f9; }
+    main { box-sizing: border-box; width: min(420px, calc(100vw - 32px)); margin: 72px auto; padding: 28px; background: #fff; border: 1px solid #dde2ea; border-radius: 8px; box-shadow: 0 10px 30px rgba(23, 32, 51, 0.08); }
+    h1 { margin: 0; font-size: 26px; line-height: 1.2; }
+    p { margin: 8px 0 24px; color: #536173; }
+    section { border-top: 1px solid #e6e9ee; padding-top: 20px; margin-top: 20px; }
+    section:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+    h2 { margin: 0 0 12px; font-size: 16px; }
+    a, button { box-sizing: border-box; display: block; width: 100%; border-radius: 6px; border: 1px solid #172033; background: #172033; color: #fff; padding: 10px 14px; font: inherit; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer; }
+    label { display: block; margin: 12px 0; color: #334155; font-size: 14px; font-weight: 600; }
+    input { box-sizing: border-box; display: block; width: 100%; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 12px; font: inherit; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Workspace Viewer</h1>
+    <p>Sign in to continue</p>
+    <section>
+      <h2>Continue with GitHub</h2>
+      <a href="${escapeHtml(githubUrl.pathname + githubUrl.search)}">Continue with GitHub</a>
+    </section>
+    ${reviewerForm}
+  </main>
+</body>
+</html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function readCookie(request: Request, name: string): string | null {

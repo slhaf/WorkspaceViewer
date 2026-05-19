@@ -9,6 +9,11 @@ export interface GitHubUserInput {
   email?: string | null;
 }
 
+export interface ReviewerUserInput {
+  providerSubject: string;
+  email: string;
+}
+
 export interface AgentRow {
   agent_id: string;
   user_id: string;
@@ -58,6 +63,28 @@ export async function upsertGitHubUser(db: D1Database, input: GitHubUserInput): 
     INSERT INTO users (user_id, auth_provider, provider_subject, login_name, email, status)
     VALUES (?, 'github', ?, ?, ?, 'active')
   `).bind(userId, input.providerSubject, input.loginName, input.email ?? null).run();
+  return { user_id: userId, status: "active" };
+}
+
+export async function upsertReviewerUser(db: D1Database, input: ReviewerUserInput): Promise<UserRow> {
+  const existing = await db.prepare(
+    "SELECT user_id, status FROM users WHERE auth_provider = 'reviewer' AND provider_subject = ?"
+  ).bind(input.providerSubject).first<UserRow>();
+
+  if (existing) {
+    await db.prepare(`
+      UPDATE users
+      SET login_name = ?, email = ?
+      WHERE user_id = ?
+    `).bind("openai-review", input.email, existing.user_id).run();
+    return existing;
+  }
+
+  const userId = `user_${crypto.randomUUID()}`;
+  await db.prepare(`
+    INSERT INTO users (user_id, auth_provider, provider_subject, login_name, email, status)
+    VALUES (?, 'reviewer', ?, 'openai-review', ?, 'active')
+  `).bind(userId, input.providerSubject, input.email).run();
   return { user_id: userId, status: "active" };
 }
 

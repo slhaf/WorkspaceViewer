@@ -38,6 +38,17 @@ pnpm wrangler secret put GITHUB_CLIENT_SECRET
 pnpm wrangler secret put OAUTH_COOKIE_SECRET
 ```
 
+Optional reviewer login for ChatGPT Apps submission review:
+
+```bash
+cd apps/worker
+pnpm wrangler secret put REVIEW_EMAIL
+pnpm wrangler secret put REVIEW_PASSWORD_HASH
+pnpm wrangler secret put REVIEW_PROVIDER_SUBJECT
+```
+
+Set `REVIEW_LOGIN_ENABLED=true` in the Worker environment to show the reviewer email/password form on the OAuth sign-in page. `REVIEW_PASSWORD_HASH` must be formatted as `sha256:<hex sha256 of password>`. If `REVIEW_PROVIDER_SUBJECT` is omitted, the Worker uses `openai-review`.
+
 Set the GitHub OAuth App callback URL to:
 
 ```text

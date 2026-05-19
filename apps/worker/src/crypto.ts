@@ -14,6 +14,22 @@ export async function verifyAgentToken(token: string, storedHash: string): Promi
   return token === storedHash;
 }
 
+export async function verifyPasswordHash(password: string, storedHash: string): Promise<boolean> {
+  if (storedHash.startsWith("sha256:")) {
+    return constantTimeEqual(`sha256:${await sha256Hex(password)}`, storedHash);
+  }
+  return false;
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) return false;
+  let diff = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    diff |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return diff === 0;
+}
+
 export function randomUrlSafe(bytes = 32): string {
   const data = new Uint8Array(bytes);
   crypto.getRandomValues(data);
