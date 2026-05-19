@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@workspace-viewer/protocol": "workspace:*",
+    "https-proxy-agent": "^9.0.0",
     "ws": "^8.18.2",
     "zod": "^3.25.7"
   },

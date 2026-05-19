@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import {
   LIMITS,
   type AgentToolRequest,
@@ -36,17 +37,15 @@ export class AgentClient {
     url.searchParams.set("agentId", this.config.agent.agentId);
 
     await new Promise<void>((resolve) => {
+      const proxyAgent = createProxyAgent(url);
       const ws = new WebSocket(url, {
         headers: {
           authorization: `Bearer ${this.config.agent.agentToken}`,
           "x-workspace-viewer-agent-version": "0.1.0"
-        }
+        },
+        agent: proxyAgent
       });
       this.socket = ws;
-
-      ws.on("open", () => {
-        ws.send(JSON.stringify({ type: "agent_hello", agentId: this.config.agent.agentId }));
-      });
 
       ws.on("message", (data) => {
         if (typeof data !== "string" && !Buffer.isBuffer(data)) return;
@@ -121,6 +120,13 @@ export class AgentClient {
     });
     await this.sendQueue;
   }
+}
+
+function createProxyAgent(url: URL): HttpsProxyAgent<string> | undefined {
+  const proxy = url.protocol === "wss:"
+    ? process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.ALL_PROXY ?? process.env.all_proxy
+    : process.env.HTTP_PROXY ?? process.env.http_proxy ?? process.env.ALL_PROXY ?? process.env.all_proxy;
+  return proxy ? new HttpsProxyAgent(proxy) : undefined;
 }
 
 function sleep(ms: number): Promise<void> {

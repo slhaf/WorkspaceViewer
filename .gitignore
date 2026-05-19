@@ -7,3 +7,4 @@ coverage
 .git-local
 .agents
 .codex
+.local
