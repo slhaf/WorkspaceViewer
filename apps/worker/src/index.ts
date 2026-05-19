@@ -24,6 +24,10 @@ const defaultHandler: ExportedHandler<Env> = {
       return Response.json({ ok: true, service: "workspace-viewer" });
     }
 
+    if (url.pathname === "/.well-known/openai-apps-challenge") {
+      return openAiAppsChallenge(env);
+    }
+
     if (url.pathname === "/authorize") {
       return handleAuthorize(request, env);
     }
@@ -86,6 +90,20 @@ function oauthProvider(env: Env, request?: Request): OAuthProvider<Env> {
 
 function publicBaseUrl(env: Env, request?: Request): string {
   return (env.PUBLIC_BASE_URL ?? (request ? new URL(request.url).origin : "http://localhost:8787")).replace(/\/$/, "");
+}
+
+function openAiAppsChallenge(env: Env): Response {
+  const token = env.OPENAI_APPS_CHALLENGE_TOKEN;
+  if (!token) {
+    return new Response("OpenAI Apps challenge token is not configured", { status: 404 });
+  }
+  return new Response(token, {
+    status: 200,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "no-store"
+    }
+  });
 }
 
 async function connectAgent(request: Request, env: Env): Promise<Response> {
