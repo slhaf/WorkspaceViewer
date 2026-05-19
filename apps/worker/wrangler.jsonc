@@ -1,0 +1,31 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "workspace-viewer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-19",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AGENT_SESSION",
+        "class_name": "AgentSession"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AgentSession"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "workspace-viewer-dev",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "development",
+    "DEV_USER_ID": "user_dev"
+  }
+}

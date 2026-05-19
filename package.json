@@ -1,0 +1,18 @@
+{
+  "name": "workspace-viewer",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm --filter @workspace-viewer/protocol build && pnpm -r typecheck",
+    "worker:dev": "pnpm --filter @workspace-viewer/worker dev",
+    "agent:dev": "pnpm --filter @workspace-viewer/agent dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

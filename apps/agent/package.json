@@ -1,0 +1,26 @@
+{
+  "name": "@workspace-viewer/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "workspace-viewer-agent": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@workspace-viewer/protocol": "workspace:*",
+    "ws": "^8.18.2",
+    "zod": "^3.25.7"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

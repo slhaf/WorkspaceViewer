@@ -1,0 +1,22 @@
+{
+  "name": "@workspace-viewer/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run",
+    "dev": "wrangler dev",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@workspace-viewer/protocol": "workspace:*",
+    "zod": "^3.25.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250519.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4",
+    "wrangler": "^4.16.1"
+  }
+}
