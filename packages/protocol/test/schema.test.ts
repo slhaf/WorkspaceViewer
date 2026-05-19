@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   batchExecInputSchema,
+  completeAgentPairingRequestSchema,
+  createAgentPairingCodeResultSchema,
   listTreeInputSchema,
+  OAUTH_SCOPE,
   searchFileInputSchema,
   workspaceToolErrorSchema
 } from "../src/index.js";
@@ -38,5 +41,20 @@ describe("protocol schemas", () => {
       code: "PATH_OUTSIDE_WORKSPACE",
       message: "outside"
     }).code).toBe("PATH_OUTSIDE_WORKSPACE");
+  });
+
+  it("uses the v1 OAuth scope for workspace access", () => {
+    expect(OAUTH_SCOPE).toBe("workspace.access");
+  });
+
+  it("validates pairing payloads", () => {
+    expect(completeAgentPairingRequestSchema.parse({
+      pairingCode: "ABCD-EFGH"
+    }).pairingCode).toBe("ABCD-EFGH");
+    expect(createAgentPairingCodeResultSchema.parse({
+      pairingCode: "ABCD-EFGH",
+      expiresAt: "2026-05-20T12:34:56.000Z",
+      commandHint: "workspace-viewer-agent login ABCD-EFGH --server https://example.com"
+    }).pairingCode).toBe("ABCD-EFGH");
   });
 });

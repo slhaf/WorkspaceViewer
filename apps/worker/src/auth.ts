@@ -1,15 +1,27 @@
 import type { Env } from "./env.js";
 import { getUser } from "./repository.js";
+import { OAUTH_SCOPE } from "@workspace-viewer/protocol";
 
 export interface AuthenticatedUser {
   userId: string;
 }
 
-export async function resolveUser(env: Env, request: Request): Promise<AuthenticatedUser | Response> {
-  const devUserId = env.DEV_USER_ID;
-  const userId = request.headers.get("x-workspace-viewer-user") ?? devUserId;
+export interface OAuthProps {
+  userId?: unknown;
+}
+
+export async function resolveUser(
+  env: Env,
+  request: Request,
+  props?: OAuthProps
+): Promise<AuthenticatedUser | Response> {
+  const oauthUserId = typeof props?.userId === "string" ? props.userId : undefined;
+  const devBypass = env.DEV_AUTH_BYPASS_ENABLED === "true";
+  const devUserId = devBypass ? env.DEV_USER_ID : undefined;
+  const headerUserId = devBypass ? request.headers.get("x-workspace-viewer-user") ?? undefined : undefined;
+  const userId = oauthUserId ?? headerUserId ?? devUserId;
   if (!userId) {
-    return Response.json({ error: "authentication_required" }, { status: 401 });
+    return authenticationRequired(request);
   }
 
   const user = await getUser(env.DB, userId);
@@ -22,12 +34,20 @@ export async function resolveUser(env: Env, request: Request): Promise<Authentic
   return { userId };
 }
 
-export function oauthPlaceholder(pathname: string): Response {
-  return new Response(
-    `Workspace Viewer OAuth route ${pathname} is reserved. Development mode uses DEV_USER_ID.`,
+export function authenticationRequired(request: Request): Response {
+  return Response.json(
+    { error: "authentication_required" },
     {
-      status: 501,
-      headers: { "content-type": "text/plain; charset=utf-8" }
+      status: 401,
+      headers: {
+        "WWW-Authenticate": oauthChallenge(request)
+      }
     }
   );
+}
+
+export function oauthChallenge(request: Request): string {
+  const url = new URL(request.url);
+  const metadataUrl = `${url.origin}/.well-known/oauth-protected-resource`;
+  return `Bearer resource_metadata="${metadataUrl}", scope="${OAUTH_SCOPE}"`;
 }

@@ -1,6 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   LIMITS,
+  type AgentControlMessage,
+  agentControlMessageSchema,
   type AgentToolResultHeader,
   agentToolResultHeaderSchema,
   type DispatchRequest,
@@ -8,6 +10,7 @@ import {
   relayError
 } from "@workspace-viewer/protocol";
 import type { Env } from "./env.js";
+import { getAgent, replaceAgentWorkspaces } from "./repository.js";
 
 interface Waiter {
   request: DispatchRequest;
@@ -140,7 +143,14 @@ export class AgentSession extends DurableObject<Env> {
       return;
     }
 
-    const parsed = agentToolResultHeaderSchema.parse(JSON.parse(message));
+    const raw = JSON.parse(message) as unknown;
+    const control = agentControlMessageSchema.safeParse(raw);
+    if (control.success) {
+      await this.handleControlFrame(ws, control.data);
+      return;
+    }
+
+    const parsed = agentToolResultHeaderSchema.parse(raw);
     const waiter = this.waiters.get(parsed.requestId);
     if (!waiter) {
       ws.close(4002, "Unknown request id");
@@ -170,6 +180,36 @@ export class AgentSession extends DurableObject<Env> {
     }
 
     this.pendingBinary = { header: parsed };
+  }
+
+  private async handleControlFrame(
+    ws: WebSocket,
+    message: AgentControlMessage
+  ): Promise<void> {
+    const attachment = ws.deserializeAttachment() as AgentAttachment | undefined;
+    if (!attachment || message.agentId !== attachment.agentId) {
+      ws.close(4002, "Agent identity mismatch");
+      return;
+    }
+
+    const agent = await getAgent(this.env.DB, attachment.agentId);
+    if (!agent) {
+      ws.close(4002, "Unknown agent");
+      return;
+    }
+
+    await replaceAgentWorkspaces(
+      this.env.DB,
+      attachment.agentId,
+      agent.user_id,
+      message.workspaces.map((workspace) => workspace.languages
+        ? workspace
+        : {
+            workspaceId: workspace.workspaceId,
+            displayName: workspace.displayName,
+            accessMode: workspace.accessMode
+          })
+    );
   }
 
   private async handleBinaryFrame(ws: WebSocket, message: ArrayBuffer): Promise<void> {

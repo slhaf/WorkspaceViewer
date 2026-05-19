@@ -23,7 +23,38 @@ pnpm wrangler d1 migrations apply workspace-viewer-dev --local
 pnpm dev
 ```
 
-Create `~/.workspace-viewer/config.json`:
+For local-only development without OAuth, set `DEV_AUTH_BYPASS_ENABLED=true` in `apps/worker/wrangler.jsonc` or your Wrangler environment.
+
+## OAuth and Agent Pairing
+
+The Worker is an OAuth-protected ChatGPT App MCP server. It uses Cloudflare Workers OAuth Provider Library, GitHub OAuth, DCR, and the single scope `workspace.access`.
+
+Required production secrets:
+
+```bash
+cd apps/worker
+pnpm wrangler secret put GITHUB_CLIENT_ID
+pnpm wrangler secret put GITHUB_CLIENT_SECRET
+pnpm wrangler secret put OAUTH_COOKIE_SECRET
+```
+
+Set the GitHub OAuth App callback URL to:
+
+```text
+https://<worker-domain>/callback/github
+```
+
+After ChatGPT calls `createAgentPairingCode`, pair the local Agent:
+
+```bash
+workspace-viewer-agent login ABCD-EFGH --server https://<worker-domain>
+workspace-viewer-agent workspace add --name WorkspaceViewer --path /home/slhaf/Documents/Projects/WorkspaceViewer
+workspace-viewer-agent run
+```
+
+The Agent stores local credentials in `~/.workspace-viewer/config.json`. Workspace root paths remain local-only; the Agent syncs only workspace summaries to D1 after WebSocket connect.
+
+Example config:
 
 ```json
 {
@@ -32,16 +63,7 @@ Create `~/.workspace-viewer/config.json`:
     "agentToken": "dev-agent-token",
     "serverBaseUrl": "http://localhost:8787"
   },
-  "workspaces": [
-    {
-      "workspaceId": "ws_dev",
-      "displayName": "WorkspaceViewer Dev",
-      "rootPath": "/home/slhaf/Documents/Projects/WorkspaceViewer",
-      "accessMode": "read_only",
-      "languages": ["typescript"],
-      "ignore": [".git", "node_modules", "dist", ".wrangler"]
-    }
-  ]
+  "workspaces": []
 }
 ```
 
@@ -59,6 +81,4 @@ curl -s http://localhost:8787/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"listWorkspaces","arguments":{"includeOffline":true}}}'
 ```
 
-## Current Authentication Mode
-
-The first implementation keeps OAuth routes reserved and uses `DEV_USER_ID` in Worker development mode. The D1 schema and route boundaries are in place for a later Workers OAuth Provider Library + GitHub OAuth integration.
+All workspace tools require OAuth unless the development bypass is explicitly enabled.

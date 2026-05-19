@@ -2,6 +2,7 @@ import WebSocket from "ws";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import {
   LIMITS,
+  type AgentControlMessage,
   type AgentToolRequest,
   agentToolRequestSchema,
   type AgentToolResultHeader,
@@ -46,6 +47,21 @@ export class AgentClient {
         agent: proxyAgent
       });
       this.socket = ws;
+
+      ws.on("open", () => {
+        this.sendControl({
+          type: "agent_hello",
+          agentId: this.config.agent.agentId,
+          workspaces: this.config.workspaces.map((workspace) => {
+            const summary = {
+              workspaceId: workspace.workspaceId,
+              displayName: workspace.displayName,
+              accessMode: workspace.accessMode
+            };
+            return workspace.languages ? { ...summary, languages: workspace.languages } : summary;
+          })
+        });
+      });
 
       ws.on("message", (data) => {
         if (typeof data !== "string" && !Buffer.isBuffer(data)) return;
@@ -119,6 +135,12 @@ export class AgentClient {
       if (body) ws.send(body);
     });
     await this.sendQueue;
+  }
+
+  private sendControl(message: AgentControlMessage): void {
+    const ws = this.socket;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(message));
   }
 }
 

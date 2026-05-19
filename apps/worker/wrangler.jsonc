@@ -24,8 +24,17 @@
       "database_id": "2b72caa6-5463-4f40-8acf-6c6592861d32"
     }
   ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "e6d69c8b6a1845eeb62951c9d66879d1"
+    }
+  ],
   "vars": {
     "ENVIRONMENT": "development",
-    "DEV_USER_ID": "user_dev"
+    "DEV_USER_ID": "user_dev",
+    "DEV_AUTH_BYPASS_ENABLED": "false",
+    "PUBLIC_BASE_URL": "https://workspace-viewer.slhafzjw-workspace-viewer.workers.dev",
+    "OAUTH_BOOTSTRAP_DEV_WORKSPACE_ON_FIRST_LOGIN": "false"
   }
 }

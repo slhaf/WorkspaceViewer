@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.6.0",
     "@workspace-viewer/protocol": "workspace:*",
     "zod": "^3.25.7"
   },

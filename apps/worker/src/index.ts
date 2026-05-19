@@ -1,10 +1,22 @@
-import { oauthPlaceholder } from "./auth.js";
+import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
+import { WorkerEntrypoint } from "cloudflare:workers";
+import { OAUTH_SCOPE } from "@workspace-viewer/protocol";
+import type { OAuthProps } from "./auth.js";
 import type { Env } from "./env.js";
 import { handleMcp } from "./mcp.js";
-import { getAgentForToken, touchAgent } from "./repository.js";
+import { handleAuthorize, handleGitHubCallback } from "./oauth.js";
+import { completeAgentPairing } from "./pairing.js";
+import { getAgent, touchAgent } from "./repository.js";
+import { verifyAgentToken } from "./crypto.js";
 export { AgentSession } from "./session.js";
 
-export default {
+class McpApiHandler extends WorkerEntrypoint<Env, OAuthProps> {
+  async fetch(request: Request): Promise<Response> {
+    return handleMcp(request, this.env, this.ctx.props);
+  }
+}
+
+const defaultHandler: ExportedHandler<Env> = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
@@ -12,12 +24,20 @@ export default {
       return Response.json({ ok: true, service: "workspace-viewer" });
     }
 
-    if (["/authorize", "/token", "/register", "/callback/github"].includes(url.pathname)) {
-      return oauthPlaceholder(url.pathname);
+    if (url.pathname === "/authorize") {
+      return handleAuthorize(request, env);
+    }
+
+    if (url.pathname === "/callback/github") {
+      return handleGitHubCallback(request, env);
     }
 
     if (url.pathname === "/agent/connect") {
       return connectAgent(request, env);
+    }
+
+    if (url.pathname === "/agent/pair/complete") {
+      return completeAgentPairing(request, env);
     }
 
     if (url.pathname === "/mcp") {
@@ -27,6 +47,41 @@ export default {
     return new Response("Not found", { status: 404 });
   }
 };
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return oauthProvider(env, request).fetch(request, env, ctx);
+  },
+
+  async scheduled(_event: ScheduledController, env: Env): Promise<void> {
+    await oauthProvider(env).purgeExpiredData(env, { batchSize: 100 });
+  }
+};
+
+function oauthProvider(env: Env, request?: Request): OAuthProvider<Env> {
+  const baseUrl = publicBaseUrl(env, request);
+  return new OAuthProvider<Env>({
+    authorizeEndpoint: `${baseUrl}/authorize`,
+    tokenEndpoint: `${baseUrl}/token`,
+    clientRegistrationEndpoint: `${baseUrl}/register`,
+    apiRoute: "/mcp",
+    apiHandler: McpApiHandler,
+    defaultHandler,
+    scopesSupported: [OAUTH_SCOPE],
+    allowPlainPKCE: false,
+    resourceMetadata: {
+      resource: baseUrl,
+      authorization_servers: [baseUrl],
+      scopes_supported: [OAUTH_SCOPE],
+      bearer_methods_supported: ["header"],
+      resource_name: "Workspace Viewer"
+    }
+  });
+}
+
+function publicBaseUrl(env: Env, request?: Request): string {
+  return (env.PUBLIC_BASE_URL ?? (request ? new URL(request.url).origin : "http://localhost:8787")).replace(/\/$/, "");
+}
 
 async function connectAgent(request: Request, env: Env): Promise<Response> {
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
@@ -41,8 +96,8 @@ async function connectAgent(request: Request, env: Env): Promise<Response> {
     return new Response("agentId and token are required", { status: 401 });
   }
 
-  const agent = await getAgentForToken(env.DB, agentId, token);
-  if (!agent) {
+  const agent = await getAgent(env.DB, agentId);
+  if (!agent || !(await verifyAgentToken(token, agent.token_hash))) {
     return new Response("Invalid agent credentials", { status: 403 });
   }
   await touchAgent(env.DB, agentId);

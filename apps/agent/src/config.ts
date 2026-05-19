@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
@@ -18,7 +18,7 @@ const agentConfigSchema = z.object({
     agentToken: z.string(),
     serverBaseUrl: z.string().url()
   }),
-  workspaces: z.array(workspaceConfigSchema).min(1)
+  workspaces: z.array(workspaceConfigSchema)
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
@@ -31,4 +31,12 @@ export function defaultConfigPath(): string {
 export async function loadConfig(configPath = defaultConfigPath()): Promise<AgentConfig> {
   const raw = await readFile(configPath, "utf8");
   return agentConfigSchema.parse(JSON.parse(raw));
+}
+
+export async function saveConfig(config: AgentConfig, configPath = defaultConfigPath()): Promise<void> {
+  const parsed = agentConfigSchema.parse(config);
+  await mkdir(path.dirname(configPath), { recursive: true });
+  const tempPath = `${configPath}.${process.pid}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+  await rename(tempPath, configPath);
 }

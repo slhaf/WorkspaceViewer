@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const WORKSPACE_TOOL_NAMES = [
   "listWorkspaces",
+  "createAgentPairingCode",
   "describeWorkspace",
   "listTree",
   "inspectFile",
@@ -19,6 +20,8 @@ export const AGENT_TOOL_NAMES = [
 
 export type WorkspaceToolName = (typeof WORKSPACE_TOOL_NAMES)[number];
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
+
+export const OAUTH_SCOPE = "workspace.access" as const;
 
 export const LIMITS = {
   listTree: {
@@ -104,6 +107,16 @@ export const listWorkspacesResultSchema = z.object({
     agentOnline: z.boolean(),
     languages: z.array(z.string()).optional()
   }))
+});
+
+export const createAgentPairingCodeInputSchema = z.object({
+  agentDisplayName: z.string().min(1).max(100).optional()
+});
+
+export const createAgentPairingCodeResultSchema = z.object({
+  pairingCode: z.string(),
+  expiresAt: z.string(),
+  commandHint: z.string()
 });
 
 export const describeWorkspaceInputSchema = z.object({
@@ -245,6 +258,7 @@ export const batchExecResultSchema = z.object({
 
 export const inputSchemas = {
   listWorkspaces: listWorkspacesInputSchema,
+  createAgentPairingCode: createAgentPairingCodeInputSchema,
   describeWorkspace: describeWorkspaceInputSchema,
   listTree: listTreeInputSchema,
   inspectFile: inspectFileInputSchema,
@@ -254,6 +268,7 @@ export const inputSchemas = {
 
 export const resultSchemas = {
   listWorkspaces: listWorkspacesResultSchema,
+  createAgentPairingCode: createAgentPairingCodeResultSchema,
   describeWorkspace: describeWorkspaceResultSchema,
   listTree: listTreeResultSchema,
   inspectFile: inspectFileResultSchema,
@@ -283,6 +298,49 @@ export const agentToolResultHeaderSchema = z.object({
 });
 
 export type AgentToolResultHeader = z.infer<typeof agentToolResultHeaderSchema>;
+
+export const agentWorkspaceSummarySchema = z.object({
+  workspaceId: z.string(),
+  displayName: z.string(),
+  accessMode: z.literal("read_only"),
+  languages: z.array(z.string()).optional()
+});
+
+export type AgentWorkspaceSummary = z.infer<typeof agentWorkspaceSummarySchema>;
+
+export const agentHelloMessageSchema = z.object({
+  type: z.literal("agent_hello"),
+  agentId: z.string(),
+  workspaces: z.array(agentWorkspaceSummarySchema)
+});
+
+export const agentWorkspaceSyncMessageSchema = z.object({
+  type: z.literal("workspace_sync"),
+  agentId: z.string(),
+  workspaces: z.array(agentWorkspaceSummarySchema)
+});
+
+export const agentControlMessageSchema = z.discriminatedUnion("type", [
+  agentHelloMessageSchema,
+  agentWorkspaceSyncMessageSchema
+]);
+
+export type AgentControlMessage = z.infer<typeof agentControlMessageSchema>;
+
+export const completeAgentPairingRequestSchema = z.object({
+  pairingCode: z.string().min(1),
+  agentDisplayName: z.string().min(1).max(100).optional()
+});
+
+export type CompleteAgentPairingRequest = z.infer<typeof completeAgentPairingRequestSchema>;
+
+export const completeAgentPairingResponseSchema = z.object({
+  agentId: z.string(),
+  agentToken: z.string(),
+  serverBaseUrl: z.string().url()
+});
+
+export type CompleteAgentPairingResponse = z.infer<typeof completeAgentPairingResponseSchema>;
 
 export interface DispatchRequest {
   requestId: string;

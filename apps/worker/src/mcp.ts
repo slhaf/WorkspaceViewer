@@ -2,14 +2,20 @@ import {
   LIMITS,
   type AgentToolName,
   type DispatchRequest,
+  OAUTH_SCOPE,
   inputSchemas,
   resultSchemas,
   workspaceError
 } from "@workspace-viewer/protocol";
 import type { Env } from "./env.js";
-import { resolveUser } from "./auth.js";
+import { oauthChallenge, type OAuthProps, resolveUser } from "./auth.js";
 import { gunzipJson } from "./gzip.js";
-import { getWorkspaceForUser, listWorkspacesForUser, parseLanguages } from "./repository.js";
+import {
+  createPairingSession,
+  getWorkspaceForUser,
+  listWorkspacesForUser,
+  parseLanguages
+} from "./repository.js";
 
 interface JsonRpcRequest {
   jsonrpc?: "2.0";
@@ -20,6 +26,7 @@ interface JsonRpcRequest {
 
 const toolDescriptions: Record<string, string> = {
   listWorkspaces: "Use this when you need to discover the user's registered local workspaces.",
+  createAgentPairingCode: "Use this when the user needs to pair a local Workspace Viewer Agent.",
   describeWorkspace: "Use this when you need a low-cost summary of a workspace.",
   listTree: "Use this when you need to inspect a workspace directory tree.",
   inspectFile: "Use this when you need to read a bounded range from a text file.",
@@ -27,29 +34,31 @@ const toolDescriptions: Record<string, string> = {
   batchExec: "Use this when you need to run several read-only workspace inspections in one call."
 };
 
-export async function handleMcp(request: Request, env: Env): Promise<Response> {
+export async function handleMcp(request: Request, env: Env, props?: OAuthProps): Promise<Response> {
   if (request.method === "GET") {
     return Response.json({
       name: "workspace-viewer",
       tools: Object.entries(toolDescriptions).map(([name, description]) => ({
         name,
         description,
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+        securitySchemes: securitySchemes(),
+        annotations: toolAnnotations(name)
       }))
     });
   }
 
-  const auth = await resolveUser(env, request);
-  if (auth instanceof Response) return auth;
-
   const rpc = await request.json<JsonRpcRequest>();
+  const auth = await resolveUser(env, request, props);
+  if (auth instanceof Response) return rpcAuthError(rpc.id, request, "Authentication required");
+
   if (rpc.method === "tools/list") {
     return rpcResult(rpc.id, {
       tools: Object.entries(toolDescriptions).map(([name, description]) => ({
         name,
         description,
         inputSchema: { type: "object" },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+        securitySchemes: securitySchemes(),
+        annotations: toolAnnotations(name)
       }))
     });
   }
@@ -100,6 +109,19 @@ async function callTool(env: Env, userId: string, name: string, args: unknown): 
     return resultSchemas.listWorkspaces.parse({ workspaces });
   }
 
+  if (name === "createAgentPairingCode") {
+    const input = inputSchemas.createAgentPairingCode.parse(args);
+    const pairingCode = await createUniquePairingCode(env.DB);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    await createPairingSession(env.DB, pairingCode, userId, input.agentDisplayName, expiresAt);
+    const serverBaseUrl = getPublicBaseUrl(env);
+    return resultSchemas.createAgentPairingCode.parse({
+      pairingCode,
+      expiresAt,
+      commandHint: `workspace-viewer-agent login ${pairingCode} --server ${serverBaseUrl}`
+    });
+  }
+
   if (!isAgentToolName(name)) {
     throw new Error(`Unknown tool: ${name}`);
   }
@@ -142,6 +164,40 @@ function isAgentToolName(value: string): value is AgentToolName {
   return ["describeWorkspace", "listTree", "inspectFile", "searchFile", "batchExec"].includes(value);
 }
 
+function securitySchemes(): Array<{ type: "oauth2"; scopes: string[] }> {
+  return [{ type: "oauth2", scopes: [OAUTH_SCOPE] }];
+}
+
+function toolAnnotations(name: string): { readOnlyHint: boolean; destructiveHint: false; openWorldHint: false } {
+  return {
+    readOnlyHint: name !== "createAgentPairingCode",
+    destructiveHint: false,
+    openWorldHint: false
+  };
+}
+
+async function createUniquePairingCode(db: D1Database): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = pairingCode();
+    const existing = await db.prepare("SELECT code FROM pairing_sessions WHERE code = ?").bind(code).first();
+    if (!existing) return code;
+  }
+  throw new Error("Unable to allocate pairing code");
+}
+
+function pairingCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  const chars = [...bytes].map((byte) => alphabet[byte % alphabet.length]);
+  return `${chars.slice(0, 4).join("")}-${chars.slice(4).join("")}`;
+}
+
+function getPublicBaseUrl(env: Env): string {
+  if (!env.PUBLIC_BASE_URL) throw new Error("PUBLIC_BASE_URL is not configured");
+  return env.PUBLIC_BASE_URL.replace(/\/$/, "");
+}
+
 function zObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -152,4 +208,25 @@ function rpcResult(id: JsonRpcRequest["id"], result: unknown): Response {
 
 function rpcError(id: JsonRpcRequest["id"], code: number, message: string): Response {
   return Response.json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
+}
+
+function rpcAuthError(id: JsonRpcRequest["id"], request: Request, description: string): Response {
+  return Response.json({
+    jsonrpc: "2.0",
+    id: id ?? null,
+    result: {
+    isError: true,
+    content: [{ type: "text", text: description }],
+    _meta: {
+      "mcp/www_authenticate": [
+        `${oauthChallenge(request)}, error="insufficient_scope", error_description="${description.replaceAll("\"", "'")}"`
+      ]
+    }
+    }
+  }, {
+    status: 401,
+    headers: {
+      "WWW-Authenticate": oauthChallenge(request)
+    }
+  });
 }
