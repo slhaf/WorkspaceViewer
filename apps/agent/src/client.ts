@@ -38,6 +38,7 @@ export class AgentClient {
     url.searchParams.set("agentId", this.config.agent.agentId);
 
     await new Promise<void>((resolve) => {
+      let opened = false;
       const proxyAgent = createProxyAgent(url);
       const ws = new WebSocket(url, {
         headers: {
@@ -49,6 +50,8 @@ export class AgentClient {
       this.socket = ws;
 
       ws.on("open", () => {
+        opened = true;
+        console.error(`Workspace Viewer Agent connected: ${this.config.agent.agentId}`);
         this.sendControl({
           type: "agent_hello",
           agentId: this.config.agent.agentId,
@@ -69,8 +72,19 @@ export class AgentClient {
         void this.handleMessage(text);
       });
 
-      ws.on("close", () => resolve());
-      ws.on("error", () => resolve());
+      ws.on("close", (code, reason) => {
+        const reasonText = reason.length > 0 ? ` ${reason.toString("utf8")}` : "";
+        if (opened) {
+          console.error(`Workspace Viewer Agent disconnected: ${code}${reasonText}`);
+        } else {
+          console.error(`Workspace Viewer Agent connection closed before opening: ${code}${reasonText}`);
+        }
+        resolve();
+      });
+      ws.on("error", (error) => {
+        console.error(`Workspace Viewer Agent connection error: ${error.message}`);
+        resolve();
+      });
     });
   }
 

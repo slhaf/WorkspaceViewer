@@ -51,6 +51,15 @@ describe("protocol schemas", () => {
     expect(completeAgentPairingRequestSchema.parse({
       pairingCode: "ABCD-EFGH"
     }).pairingCode).toBe("ABCD-EFGH");
+    expect(completeAgentPairingRequestSchema.parse({
+      pairingCode: "ABCD-EFGH",
+      workspaces: [{
+        workspaceId: "ws_test",
+        displayName: "Test Workspace",
+        accessMode: "read_only",
+        languages: ["typescript"]
+      }]
+    }).workspaces?.[0]?.workspaceId).toBe("ws_test");
     expect(createAgentPairingCodeResultSchema.parse({
       pairingCode: "ABCD-EFGH",
       expiresAt: "2026-05-20T12:34:56.000Z",

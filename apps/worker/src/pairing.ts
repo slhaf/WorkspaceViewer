@@ -7,7 +7,8 @@ import { hashAgentToken, randomUrlSafe } from "./crypto.js";
 import {
   createAgent,
   getPairingSession,
-  markPairingSessionUsed
+  markPairingSessionUsed,
+  replaceAgentWorkspaces
 } from "./repository.js";
 
 export async function completeAgentPairing(request: Request, env: Env): Promise<Response> {
@@ -37,6 +38,9 @@ export async function completeAgentPairing(request: Request, env: Env): Promise<
   const agentToken = `wvagt_${randomUrlSafe(32)}`;
   const displayName = input.agentDisplayName ?? session.agent_display_name ?? "Local Agent";
   await createAgent(env.DB, agentId, session.user_id, displayName, await hashAgentToken(agentToken));
+  if (input.workspaces) {
+    await replaceAgentWorkspaces(env.DB, agentId, session.user_id, input.workspaces);
+  }
 
   return Response.json(completeAgentPairingResponseSchema.parse({
     agentId,

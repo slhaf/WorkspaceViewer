@@ -49,19 +49,27 @@ async function login(args: string[]): Promise<void> {
     return;
   }
 
+  const existing = await loadConfigIfExists(configPath);
   const response = await fetch(new URL("/agent/pair/complete", server), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       pairingCode,
-      agentDisplayName: displayName
+      agentDisplayName: displayName,
+      workspaces: existing?.workspaces.map((workspace) => {
+        const summary = {
+          workspaceId: workspace.workspaceId,
+          displayName: workspace.displayName,
+          accessMode: workspace.accessMode
+        };
+        return workspace.languages ? { ...summary, languages: workspace.languages } : summary;
+      }) ?? []
     })
   });
   if (!response.ok) {
     throw new Error(`Pairing failed: ${response.status} ${await response.text()}`);
   }
   const paired = completeAgentPairingResponseSchema.parse(await response.json());
-  const existing = await loadConfigIfExists(configPath);
   await saveConfig({
     agent: {
       agentId: paired.agentId,

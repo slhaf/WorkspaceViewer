@@ -329,7 +329,8 @@ export type AgentControlMessage = z.infer<typeof agentControlMessageSchema>;
 
 export const completeAgentPairingRequestSchema = z.object({
   pairingCode: z.string().min(1),
-  agentDisplayName: z.string().min(1).max(100).optional()
+  agentDisplayName: z.string().min(1).max(100).optional(),
+  workspaces: z.array(agentWorkspaceSummarySchema).optional()
 });
 
 export type CompleteAgentPairingRequest = z.infer<typeof completeAgentPairingRequestSchema>;
