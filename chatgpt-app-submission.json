@@ -1,0 +1,180 @@
+{
+  "$schema": "https://developers.openai.com/apps-sdk/schemas/chatgpt-app-submission.v1.json",
+  "schema_version": 1,
+  "app_info": {
+    "display_name": "Workspace Viewer",
+    "subtitle": "Read local workspaces",
+    "description": "Workspace Viewer lets ChatGPT inspect user-approved local workspaces through a read-only Agent. Users can discover registered workspaces, summarize project structure, inspect text files, search paths or file contents, and batch several read-only workspace checks into one request. It also provides a pairing flow so users can connect their own local Agent before using workspace tools.",
+    "category": "DEVELOPER_TOOLS"
+  },
+  "tools": {
+    "listWorkspaces": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only lists workspace summaries already registered for the authenticated user and does not modify workspace or Agent state.",
+        "open_world_justification": "Does not publish content or change public internet state or external third-party systems.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "createAgentPairingCode": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a short-lived private pairing session for the authenticated user so a local Agent can be connected.",
+        "open_world_justification": "Only updates private application state and does not publish content or change public external systems.",
+        "destructive_justification": "Creates a temporary pairing code and does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "describeWorkspace": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only returns a bounded read-only summary of the selected local workspace without changing files or settings.",
+        "open_world_justification": "Does not send data to public systems or change third-party or internet-visible state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listTree": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads and returns a bounded directory tree for the selected workspace and never mutates the filesystem.",
+        "open_world_justification": "Does not publish content or change public internet state or external third-party systems.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "inspectFile": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads a bounded range from a workspace text file and does not modify the file or its metadata.",
+        "open_world_justification": "Does not publish content or change public internet state or external third-party systems.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "searchFile": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only searches paths or file contents inside an approved workspace and returns matches without changing stored data.",
+        "open_world_justification": "Does not publish content or change public internet state or external third-party systems.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "batchExec": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Runs only approved read-only workspace inspection operations and returns their results without mutating files or application records.",
+        "open_world_justification": "Does not publish content or change public internet state or external third-party systems.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    }
+  },
+  "test_cases": [
+    {
+      "description": "Discover the user's available registered workspaces before choosing one to inspect.",
+      "user_prompt": "Show me the local workspaces I have connected.",
+      "file_attachment_urls": null,
+      "tools_triggered": "listWorkspaces",
+      "expected_output": "Returns the user's registered workspaces with enough information to identify an available target.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Generate a pairing code so the user can connect a local Agent.",
+      "user_prompt": "Help me connect a new Workspace Viewer Agent on this machine.",
+      "file_attachment_urls": null,
+      "tools_triggered": "createAgentPairingCode",
+      "expected_output": "Returns a short-lived pairing code and a concise local Agent login command hint.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Summarize the top-level structure of a selected workspace.",
+      "user_prompt": "Give me a quick overview of this workspace's structure before we dig into files.",
+      "file_attachment_urls": null,
+      "tools_triggered": "describeWorkspace",
+      "expected_output": "Returns a concise workspace summary such as root entries and project markers for the selected workspace.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Inspect the directory tree under a workspace path with bounded depth.",
+      "user_prompt": "Show me the source tree for this workspace, but keep it shallow.",
+      "file_attachment_urls": null,
+      "tools_triggered": "listTree",
+      "expected_output": "Returns a bounded directory tree for the selected workspace path and indicates if the result was truncated.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Read a bounded section of a text file in the selected workspace.",
+      "user_prompt": "Open the README for this workspace and read the first part that explains what it does.",
+      "file_attachment_urls": null,
+      "tools_triggered": "inspectFile",
+      "expected_output": "Returns the requested file range with line bounds and enough context to summarize the file accurately.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Search file contents for an implementation detail inside a selected workspace.",
+      "user_prompt": "Search this workspace for where the Agent WebSocket connection is created.",
+      "file_attachment_urls": null,
+      "tools_triggered": "searchFile",
+      "expected_output": "Returns matching file locations and concise previews that help identify the relevant implementation.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Batch several read-only workspace inspections into one efficient request.",
+      "user_prompt": "Read the README, the Agent client implementation, and the Agent tools implementation together, then summarize how the Agent works.",
+      "file_attachment_urls": null,
+      "tools_triggered": "batchExec",
+      "expected_output": "Returns the combined results of several read-only workspace checks so the assistant can answer with fewer tool round trips.",
+      "expected_output_url": null
+    }
+  ],
+  "negative_test_cases": [
+    {
+      "description": "Do not trigger for requests to modify local source files because the app is read-only.",
+      "user_prompt": "Edit my local source file and replace every TODO comment with DONE.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because it does not modify local files.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not trigger for unrelated calendar or scheduling requests.",
+      "user_prompt": "What meetings do I have tomorrow afternoon?",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because the request is unrelated to local workspace inspection.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not trigger for public web research requests that do not involve a connected workspace.",
+      "user_prompt": "Search the web for the latest Cloudflare Workers pricing changes.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because it inspects connected local workspaces rather than the public web.",
+      "expected_output_url": null
+    }
+  ]
+}
