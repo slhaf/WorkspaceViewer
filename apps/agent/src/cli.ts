@@ -294,6 +294,7 @@ function positionals(args: string[]): string[] {
   const values: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
+    if (!value) continue;
     if (value.startsWith("--")) {
       index += 1;
       continue;
