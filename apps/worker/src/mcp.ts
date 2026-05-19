@@ -103,6 +103,130 @@ const toolInputSchemas: Record<string, JsonSchema> = {
   }, ["workspaceId", "operations"])
 };
 
+const workspaceToolErrorOutputSchema = objectSchema({
+  code: {
+    type: "string",
+    enum: [
+      "WORKSPACE_NOT_FOUND",
+      "WORKSPACE_FORBIDDEN",
+      "PATH_OUTSIDE_WORKSPACE",
+      "PATH_IGNORED",
+      "FILE_NOT_FOUND",
+      "FILE_TOO_LARGE",
+      "INVALID_PARAMS",
+      "SEARCH_TIMEOUT",
+      "RESULT_TOO_LARGE",
+      "TOOL_TIMEOUT",
+      "INTERNAL_ERROR"
+    ]
+  },
+  message: { type: "string" },
+  details: { type: "object" }
+}, ["code", "message"]);
+
+const toolOutputSchemas: Record<string, JsonSchema> = {
+  listWorkspaces: objectSchema({
+    workspaces: {
+      type: "array",
+      items: objectSchema({
+        workspaceId: { type: "string" },
+        displayName: { type: "string" },
+        agentId: { type: "string" },
+        agentDisplayName: { type: "string" },
+        agentOnline: { type: "boolean" },
+        languages: { type: "array", items: { type: "string" } }
+      }, ["workspaceId", "displayName", "agentId", "agentOnline"])
+    }
+  }, ["workspaces"]),
+  createAgentPairingCode: objectSchema({
+    pairingCode: { type: "string" },
+    expiresAt: { type: "string" },
+    commandHint: { type: "string" }
+  }, ["pairingCode", "expiresAt", "commandHint"]),
+  describeWorkspace: objectSchema({
+    workspaceId: { type: "string" },
+    displayName: { type: "string" },
+    languages: { type: "array", items: { type: "string" } },
+    rootEntries: {
+      type: "array",
+      items: objectSchema({
+        name: { type: "string" },
+        type: { type: "string", enum: ["file", "directory"] }
+      }, ["name", "type"])
+    },
+    markers: { type: "array", items: { type: "string" } }
+  }, ["workspaceId", "displayName", "rootEntries"]),
+  listTree: {
+    ...objectSchema({
+      path: { type: "string" },
+      depth: { type: "integer", minimum: 0 },
+      entries: { type: "array", items: { $ref: "#/$defs/treeEntry" } },
+      truncated: { type: "boolean" }
+    }, ["path", "depth", "entries", "truncated"]),
+    $defs: {
+      treeEntry: objectSchema({
+        name: { type: "string" },
+        path: { type: "string" },
+        type: { type: "string", enum: ["file", "directory"] },
+        children: { type: "array", items: { $ref: "#/$defs/treeEntry" } }
+      }, ["name", "path", "type"])
+    }
+  },
+  inspectFile: objectSchema({
+    path: { type: "string" },
+    language: { type: "string" },
+    sizeBytes: { type: "integer", minimum: 0 },
+    totalLines: { type: "integer", minimum: 0 },
+    startLine: { type: "integer", minimum: 1 },
+    endLine: { type: "integer", minimum: 0 },
+    content: { type: "string" },
+    truncated: { type: "boolean" }
+  }, ["path", "sizeBytes", "totalLines", "startLine", "endLine", "content", "truncated"]),
+  searchFile: {
+    oneOf: [
+      objectSchema({
+        mode: { type: "string", const: "path" },
+        query: { type: "string" },
+        matches: {
+          type: "array",
+          items: objectSchema({
+            path: { type: "string" },
+            name: { type: "string" },
+            type: { type: "string", enum: ["file", "directory"] }
+          }, ["path", "name", "type"])
+        },
+        truncated: { type: "boolean" }
+      }, ["mode", "query", "matches", "truncated"]),
+      objectSchema({
+        mode: { type: "string", const: "content" },
+        query: { type: "string" },
+        matches: {
+          type: "array",
+          items: objectSchema({
+            path: { type: "string" },
+            line: { type: "integer", minimum: 1 },
+            preview: { type: "string" },
+            before: { type: "array", items: { type: "string" } },
+            after: { type: "array", items: { type: "string" } }
+          }, ["path", "line", "preview"])
+        },
+        truncated: { type: "boolean" }
+      }, ["mode", "query", "matches", "truncated"])
+    ]
+  },
+  batchExec: objectSchema({
+    results: {
+      type: "array",
+      items: objectSchema({
+        id: { type: "string" },
+        ok: { type: "boolean" },
+        result: {},
+        error: workspaceToolErrorOutputSchema
+      }, ["id", "ok"])
+    }
+  }, ["results"])
+};
+
 export async function handleMcp(request: Request, env: Env, props?: OAuthProps): Promise<Response> {
   if (request.method === "GET") {
     return Response.json({
@@ -257,6 +381,7 @@ function toolDescriptor(name: string, description: string): {
   name: string;
   description: string;
   inputSchema: JsonSchema;
+  outputSchema: JsonSchema;
   securitySchemes: Array<{ type: "oauth2"; scopes: string[] }>;
   annotations: { readOnlyHint: boolean; destructiveHint: false; openWorldHint: false };
 } {
@@ -264,6 +389,7 @@ function toolDescriptor(name: string, description: string): {
     name,
     description,
     inputSchema: toolInputSchemas[name] ?? objectSchema(),
+    outputSchema: toolOutputSchemas[name] ?? objectSchema(),
     securitySchemes: securitySchemes(),
     annotations: toolAnnotations(name)
   };
