@@ -13,5 +13,6 @@ export interface Env {
   GITHUB_CLIENT_SECRET?: string;
   OAUTH_COOKIE_SECRET?: string;
   OAUTH_BOOTSTRAP_DEV_WORKSPACE_ON_FIRST_LOGIN?: string;
+  OPENAI_APPS_CHALLENGE_TOKEN?: string;
   ENVIRONMENT?: string;
 }
