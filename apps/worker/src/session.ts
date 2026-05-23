@@ -10,7 +10,7 @@ import {
   relayError
 } from "@workspace-viewer/protocol";
 import type { Env } from "./env.js";
-import { getAgent, replaceAgentWorkspaces } from "./repository.js";
+import { getAgent, replaceAgentWorkspaces, touchAgent } from "./repository.js";
 
 interface Waiter {
   request: DispatchRequest;
@@ -123,7 +123,8 @@ export class AgentSession extends DurableObject<Env> {
         return;
       }
       await this.handleBinaryFrame(ws, message);
-    } catch {
+    } catch (error) {
+      this.logProtocolError(ws, "Unhandled WebSocket message error", error);
       this.failAll("AGENT_PROTOCOL_ERROR", "Agent sent an invalid result frame");
       ws.close(4002, "Protocol error");
     }
@@ -147,6 +148,7 @@ export class AgentSession extends DurableObject<Env> {
         "Agent interleaved a header before sending the required binary body"
       );
       this.pendingBinary = null;
+      this.logProtocolError(ws, "Interleaved result frames");
       ws.close(4002, "Interleaved result frames");
       return;
     }
@@ -161,6 +163,7 @@ export class AgentSession extends DurableObject<Env> {
     const parsed = agentToolResultHeaderSchema.parse(raw);
     const waiter = this.waiters.get(parsed.requestId);
     if (!waiter) {
+      this.logProtocolError(ws, "Unknown request id", undefined, { requestId: parsed.requestId });
       ws.close(4002, "Unknown request id");
       return;
     }
@@ -178,11 +181,21 @@ export class AgentSession extends DurableObject<Env> {
 
     if (parsed.compressedBytes <= 0 || parsed.compressedBytes > LIMITS.relay.maxCompressedPayloadBytes) {
       this.failWaiter(parsed.requestId, "COMPRESSED_RESULT_TOO_LARGE", "Compressed result exceeds the relay limit");
+      this.logProtocolError(ws, "Compressed result too large", undefined, {
+        requestId: parsed.requestId,
+        compressedBytes: parsed.compressedBytes,
+        maxCompressedPayloadBytes: LIMITS.relay.maxCompressedPayloadBytes
+      });
       ws.close(4002, "Compressed result too large");
       return;
     }
     if (parsed.uncompressedBytes > LIMITS.relay.maxUncompressedPayloadBytes) {
       this.failWaiter(parsed.requestId, "COMPRESSED_RESULT_TOO_LARGE", "Uncompressed result exceeds the relay limit");
+      this.logProtocolError(ws, "Uncompressed result too large", undefined, {
+        requestId: parsed.requestId,
+        uncompressedBytes: parsed.uncompressedBytes,
+        maxUncompressedPayloadBytes: LIMITS.relay.maxUncompressedPayloadBytes
+      });
       ws.close(4002, "Uncompressed result too large");
       return;
     }
@@ -196,13 +209,23 @@ export class AgentSession extends DurableObject<Env> {
   ): Promise<void> {
     const attachment = ws.deserializeAttachment() as AgentAttachment | undefined;
     if (!attachment || message.agentId !== attachment.agentId) {
+      this.logProtocolError(ws, "Agent identity mismatch", undefined, {
+        messageAgentId: message.agentId,
+        attachmentAgentId: attachment?.agentId
+      });
       ws.close(4002, "Agent identity mismatch");
       return;
     }
 
     const agent = await getAgent(this.env.DB, attachment.agentId);
     if (!agent) {
+      this.logProtocolError(ws, "Unknown agent");
       ws.close(4002, "Unknown agent");
+      return;
+    }
+
+    if (message.type === "agent_ping") {
+      await touchAgent(this.env.DB, attachment.agentId);
       return;
     }
 
@@ -222,6 +245,7 @@ export class AgentSession extends DurableObject<Env> {
 
   private async handleBinaryFrame(ws: WebSocket, message: ArrayBuffer): Promise<void> {
     if (!this.pendingBinary) {
+      this.logProtocolError(ws, "Binary frame without header", undefined, { byteLength: message.byteLength });
       ws.close(4002, "Binary frame without header");
       return;
     }
@@ -230,11 +254,17 @@ export class AgentSession extends DurableObject<Env> {
     this.pendingBinary = null;
     const waiter = this.waiters.get(header.requestId);
     if (!waiter) {
+      this.logProtocolError(ws, "Missing waiter", undefined, { requestId: header.requestId });
       ws.close(4002, "Missing waiter");
       return;
     }
     if (message.byteLength !== header.compressedBytes) {
       this.failWaiter(header.requestId, "AGENT_PROTOCOL_ERROR", "Binary body size does not match header");
+      this.logProtocolError(ws, "Body size mismatch", undefined, {
+        requestId: header.requestId,
+        expectedCompressedBytes: header.compressedBytes,
+        actualBytes: message.byteLength
+      });
       ws.close(4002, "Body size mismatch");
       return;
     }
@@ -276,5 +306,26 @@ export class AgentSession extends DurableObject<Env> {
       waiter.resolve({ requestId, ok: false, error: relayError(code, message) });
     }
     this.waiters.clear();
+  }
+
+  private logProtocolError(
+    ws: WebSocket,
+    message: string,
+    error?: unknown,
+    details: Record<string, unknown> = {}
+  ): void {
+    const attachment = ws.deserializeAttachment() as AgentAttachment | undefined;
+    console.error("Agent WebSocket protocol error", {
+      message,
+      agentId: attachment?.agentId,
+      clientVersion: attachment?.clientVersion,
+      connectedAt: attachment?.connectedAt,
+      pendingBinaryRequestId: this.pendingBinary?.header.requestId,
+      waiterCount: this.waiters.size,
+      error: error instanceof Error
+        ? { name: error.name, message: error.message, stack: error.stack }
+        : error,
+      ...details
+    });
   }
 }
