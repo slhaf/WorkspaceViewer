@@ -1,41 +1,45 @@
 {
-  "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "workspace-viewer",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-05-19",
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "AGENT_SESSION",
-        "class_name": "AgentSession"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["AgentSession"]
+    "$schema": "../../node_modules/wrangler/config-schema.json",
+    "name": "workspace-viewer",
+    "main": "src/index.ts",
+    "compatibility_date": "2026-05-19",
+    "durable_objects": {
+        "bindings": [
+            {
+                "name": "AGENT_SESSION",
+                "class_name": "AgentSession"
+            }
+        ]
+    },
+    "migrations": [
+        {
+            "tag": "v1",
+            "new_sqlite_classes": [
+                "AgentSession"
+            ]
+        }
+    ],
+    "d1_databases": [
+        {
+            "binding": "DB",
+            "database_name": "workspace-viewer-dev",
+            "database_id": "2b72caa6-5463-4f40-8acf-6c6592861d32"
+        }
+    ],
+    "kv_namespaces": [
+        {
+            "binding": "OAUTH_KV",
+            "id": "e6d69c8b6a1845eeb62951c9d66879d1"
+        }
+    ],
+    "vars": {
+        "ENVIRONMENT": "development",
+        "DEV_USER_ID": "user_dev",
+        "DEV_AUTH_BYPASS_ENABLED": "false",
+        "PUBLIC_BASE_URL": "https://workspace-viewer.slhafzjw-workspace-viewer.workers.dev",
+        "OAUTH_BOOTSTRAP_DEV_WORKSPACE_ON_FIRST_LOGIN": "false",
+        "REVIEW_LOGIN_ENABLED": "true",
+        "ACTION_OAUTH_CLIENT_ID": "workspace-viewer-gpt-action",
+        "ACTION_OAUTH_REDIRECT_URIS": "https://chat.openai.com/aip/g-aadc2963793805690839a74668f8a907b85f897e/oauth/callback"
     }
-  ],
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "workspace-viewer-dev",
-      "database_id": "2b72caa6-5463-4f40-8acf-6c6592861d32"
-    }
-  ],
-  "kv_namespaces": [
-    {
-      "binding": "OAUTH_KV",
-      "id": "e6d69c8b6a1845eeb62951c9d66879d1"
-    }
-  ],
-  "vars": {
-    "ENVIRONMENT": "development",
-    "DEV_USER_ID": "user_dev",
-    "DEV_AUTH_BYPASS_ENABLED": "false",
-    "PUBLIC_BASE_URL": "https://workspace-viewer.slhafzjw-workspace-viewer.workers.dev",
-    "OAUTH_BOOTSTRAP_DEV_WORKSPACE_ON_FIRST_LOGIN": "false",
-    "REVIEW_LOGIN_ENABLED": "true"
-  }
 }

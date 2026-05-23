@@ -2,6 +2,7 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { OAUTH_SCOPE, unpairAgentRequestSchema, unpairAgentResponseSchema } from "@workspace-viewer/protocol";
 import type { OAuthProps } from "./auth.js";
+import { actionOpenApi, handleActionsApi } from "./actions.js";
 import type { Env } from "./env.js";
 import { handleMcp } from "./mcp.js";
 import { handleAuthorize, handleGitHubCallback, handleGitHubLogin, handleReviewerLogin } from "./oauth.js";
@@ -16,6 +17,12 @@ class McpApiHandler extends WorkerEntrypoint<Env, OAuthProps> {
   }
 }
 
+class ActionsApiHandler extends WorkerEntrypoint<Env, OAuthProps> {
+  async fetch(request: Request): Promise<Response> {
+    return handleActionsApi(request, this.env, this.ctx.props);
+  }
+}
+
 const defaultHandler: ExportedHandler<Env> = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -26,6 +33,10 @@ const defaultHandler: ExportedHandler<Env> = {
 
     if (url.pathname === "/.well-known/openai-apps-challenge") {
       return openAiAppsChallenge(env);
+    }
+
+    if (url.pathname === "/actions/openapi.json") {
+      return actionOpenApi(request, env);
     }
 
     if (url.pathname === "/authorize") {
@@ -81,11 +92,13 @@ function oauthProvider(env: Env, request?: Request): OAuthProvider<Env> {
     authorizeEndpoint: `${baseUrl}/authorize`,
     tokenEndpoint: `${baseUrl}/token`,
     clientRegistrationEndpoint: `${baseUrl}/register`,
-    apiRoute: "/mcp",
-    apiHandler: McpApiHandler,
+    apiHandlers: {
+      "/mcp": McpApiHandler,
+      "/actions/v1/": ActionsApiHandler
+    },
     defaultHandler,
     scopesSupported: [OAUTH_SCOPE],
-    allowPlainPKCE: false,
+    allowPlainPKCE: true,
     resourceMetadata: {
       resource: mcpResourceUrl,
       authorization_servers: [baseUrl],

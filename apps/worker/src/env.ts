@@ -18,5 +18,8 @@ export interface Env {
   REVIEW_PASSWORD_HASH?: string;
   REVIEW_PROVIDER_SUBJECT?: string;
   OPENAI_APPS_CHALLENGE_TOKEN?: string;
+  ACTION_OAUTH_CLIENT_ID?: string;
+  ACTION_OAUTH_CLIENT_SECRET?: string;
+  ACTION_OAUTH_REDIRECT_URIS?: string;
   ENVIRONMENT?: string;
 }

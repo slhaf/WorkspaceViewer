@@ -21,6 +21,29 @@ describe("oauth login", () => {
     expect(html).toContain('name="state"');
   });
 
+  it("seeds a static GPT Action OAuth client before parsing authorization requests", async () => {
+    const env = fakeEnv({
+      ACTION_OAUTH_CLIENT_ID: "gpt-action-client",
+      ACTION_OAUTH_CLIENT_SECRET: "client-secret",
+      ACTION_OAUTH_REDIRECT_URIS: "https://chatgpt.com/aip/g-test/oauth/callback"
+    });
+
+    const response = await handleAuthorize(new Request("https://worker.example.com/authorize"), env);
+    const stored = await env.OAUTH_KV.get("client:gpt-action-client");
+    const client = JSON.parse(stored ?? "{}") as {
+      clientId?: string;
+      clientSecret?: string;
+      redirectUris?: string[];
+      tokenEndpointAuthMethod?: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(client.clientId).toBe("gpt-action-client");
+    expect(client.clientSecret).not.toBe("client-secret");
+    expect(client.redirectUris).toEqual(["https://chatgpt.com/aip/g-test/oauth/callback"]);
+    expect(client.tokenEndpointAuthMethod).toBe("client_secret_basic");
+  });
+
   it("omits the reviewer form when reviewer login is disabled", async () => {
     const env = fakeEnv({ REVIEW_LOGIN_ENABLED: "false" });
 

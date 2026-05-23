@@ -32,6 +32,7 @@ interface GitHubEmailResponse {
 
 export async function handleAuthorize(request: Request, env: Env): Promise<Response> {
   assertOAuthConfig(env);
+  await ensureActionOAuthClient(env);
   const oauthRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
   const state = crypto.randomUUID();
   const stored: StoredOAuthState = {
@@ -218,6 +219,37 @@ function assertOAuthConfig(env: Env): asserts env is Env & {
   if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.OAUTH_COOKIE_SECRET) {
     throw new Error("GitHub OAuth is not configured");
   }
+}
+
+async function ensureActionOAuthClient(env: Env): Promise<void> {
+  if (!env.ACTION_OAUTH_CLIENT_ID || !env.ACTION_OAUTH_REDIRECT_URIS) return;
+
+  const redirectUris = env.ACTION_OAUTH_REDIRECT_URIS
+    .split(",")
+    .map((uri) => uri.trim())
+    .filter(Boolean);
+  if (redirectUris.length === 0) return;
+
+  const clientInfo = {
+    clientId: env.ACTION_OAUTH_CLIENT_ID,
+    ...(env.ACTION_OAUTH_CLIENT_SECRET
+      ? { clientSecret: await sha256Hex(env.ACTION_OAUTH_CLIENT_SECRET) }
+      : {}),
+    redirectUris,
+    clientName: "Workspace Viewer GPT Action",
+    grantTypes: ["authorization_code", "refresh_token"],
+    responseTypes: ["code"],
+    registrationDate: Math.floor(Date.now() / 1000),
+    tokenEndpointAuthMethod: env.ACTION_OAUTH_CLIENT_SECRET ? "client_secret_basic" : "none"
+  };
+
+  await env.OAUTH_KV.put(`client:${env.ACTION_OAUTH_CLIENT_ID}`, JSON.stringify(clientInfo));
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const data = new TextEncoder().encode(value);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function exchangeGitHubCode(request: Request, env: Env, code: string): Promise<string> {
