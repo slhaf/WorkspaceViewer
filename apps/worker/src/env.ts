@@ -21,5 +21,7 @@ export interface Env {
   ACTION_OAUTH_CLIENT_ID?: string;
   ACTION_OAUTH_CLIENT_SECRET?: string;
   ACTION_OAUTH_REDIRECT_URIS?: string;
+  CONTEXT7_API_KEY?: string;
+  CONTEXT7_BASE_URL?: string;
   ENVIRONMENT?: string;
 }

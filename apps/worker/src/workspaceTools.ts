@@ -1,9 +1,10 @@
 import {
+  AGENT_TOOL_NAMES,
   LIMITS,
   type AgentToolName,
   type DispatchRequest,
-  inputSchemas,
-  resultSchemas,
+  workspaceInputSchemas,
+  workspaceResultSchemas,
   workspaceError
 } from "@workspace-viewer/protocol";
 import type { Env } from "./env.js";
@@ -22,7 +23,7 @@ export async function callWorkspaceTool(
   args: unknown
 ): Promise<unknown> {
   if (name === "listWorkspaces") {
-    const input = inputSchemas.listWorkspaces.parse(args);
+    const input = workspaceInputSchemas.listWorkspaces.parse(args);
     const rows = await listWorkspacesForUser(env.DB, userId);
     console.log("listWorkspaces DB result", {
       workspaceCount: rows.length
@@ -56,15 +57,15 @@ export async function callWorkspaceTool(
       }))
       .filter((workspace) => input.includeOffline || workspace.agentOnline);
 
-    return resultSchemas.listWorkspaces.parse({ workspaces });
+    return workspaceResultSchemas.listWorkspaces.parse({ workspaces });
   }
 
   if (name === "createAgentPairingCode") {
-    const input = inputSchemas.createAgentPairingCode.parse(args);
+    const input = workspaceInputSchemas.createAgentPairingCode.parse(args);
     const pairingCode = await createUniquePairingCode(env.DB);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     await createPairingSession(env.DB, pairingCode, userId, input.agentDisplayName, expiresAt);
-    return resultSchemas.createAgentPairingCode.parse({
+    return workspaceResultSchemas.createAgentPairingCode.parse({
       pairingCode,
       expiresAt,
       commandHint: `workspace-viewer-agent pair ${pairingCode}`
@@ -75,7 +76,7 @@ export async function callWorkspaceTool(
     throw new Error(`Unknown tool: ${name}`);
   }
 
-  const schema = inputSchemas[name];
+  const schema = workspaceInputSchemas[name];
   const input = schema.parse(args);
   const workspaceId = zObject(input).workspaceId;
   if (typeof workspaceId !== "string") {
@@ -105,12 +106,12 @@ export async function callWorkspaceTool(
   }
 
   const json = await gunzipJson(relay.compressedPayload, relay.uncompressedBytes);
-  const parsed = resultSchemas[name].parse(json);
+  const parsed = workspaceResultSchemas[name].parse(json);
   return parsed;
 }
 
 function isAgentToolName(value: string): value is AgentToolName {
-  return ["describeWorkspace", "listTree", "inspectFile", "searchFile", "batchExec"].includes(value);
+  return (AGENT_TOOL_NAMES as readonly string[]).includes(value);
 }
 
 async function createUniquePairingCode(db: D1Database): Promise<string> {

@@ -1,12 +1,16 @@
 import { createReadStream } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { promisify } from "node:util";
 import {
   LIMITS,
   type AgentToolName,
   batchExecInputSchema,
+  describeWorkspaceChangesInputSchema,
   describeWorkspaceInputSchema,
+  inspectWorkspaceDiffInputSchema,
   inspectFileInputSchema,
   listTreeInputSchema,
   searchFileInputSchema,
@@ -14,10 +18,11 @@ import {
 } from "@workspace-viewer/protocol";
 import type { AgentConfig, WorkspaceConfig } from "./config.js";
 import { fail, toWorkspaceError } from "./errors.js";
-import { isIgnored, normalizeRelative, resolveWorkspacePath, safeLstat } from "./pathGuard.js";
+import { isIgnored, normalizeRelative, normalizeUserRelativePathForGit, resolveWorkspacePath, safeLstat } from "./pathGuard.js";
 import { countLines, detectLanguage, fileSize, isProbablyBinary, jsonByteLength } from "./utils.js";
 
 type ToolResult = unknown;
+const execFileAsync = promisify(execFile);
 
 export async function executeTool(
   config: AgentConfig,
@@ -35,6 +40,10 @@ export async function executeTool(
       return searchFile(config, searchFileInputSchema.parse(input));
     case "batchExec":
       return batchExec(config, batchExecInputSchema.parse(input));
+    case "describeWorkspaceChanges":
+      return describeWorkspaceChanges(config, describeWorkspaceChangesInputSchema.parse(input));
+    case "inspectWorkspaceDiff":
+      return inspectWorkspaceDiff(config, inspectWorkspaceDiffInputSchema.parse(input));
   }
 }
 
@@ -304,6 +313,71 @@ async function batchExec(config: AgentConfig, input: {
   return { results };
 }
 
+async function describeWorkspaceChanges(config: AgentConfig, input: {
+  workspaceId: string;
+  includeUntracked?: boolean | undefined;
+  maxFiles?: number | undefined;
+}) {
+  const workspace = getWorkspace(config, input.workspaceId);
+  const resolved = await resolveWorkspacePath(workspace);
+  const maxFiles = Math.min(input.maxFiles ?? LIMITS.gitStatus.maxFiles, LIMITS.gitStatus.maxFiles);
+  const untrackedMode = input.includeUntracked === false ? "no" : "normal";
+  const result = await runGit(resolved.realPath, [
+    "status",
+    "--porcelain=v2",
+    "--branch",
+    `--untracked-files=${untrackedMode}`
+  ], LIMITS.gitStatus.timeoutMs, LIMITS.gitStatus.maxUncompressedResultBytes);
+
+  if (result.exitCode !== 0 && isNotGitRepository(result.stderr)) {
+    return { isGitRepository: false, files: [], truncated: false };
+  }
+  if (result.exitCode !== 0) {
+    fail("GIT_COMMAND_FAILED", "Git status failed", { stderr: trimError(result.stderr) });
+  }
+
+  const parsed = parsePorcelainV2Status(result.stdout, maxFiles);
+  return {
+    isGitRepository: true,
+    ...parsed
+  };
+}
+
+async function inspectWorkspaceDiff(config: AgentConfig, input: {
+  workspaceId: string;
+  path?: string | undefined;
+  staged?: boolean | undefined;
+  maxBytes?: number | undefined;
+}) {
+  const workspace = getWorkspace(config, input.workspaceId);
+  const root = await resolveWorkspacePath(workspace);
+  const staged = input.staged ?? false;
+  const maxBytes = Math.min(input.maxBytes ?? LIMITS.gitDiff.maxBytes, LIMITS.gitDiff.maxBytes);
+  const args = ["diff"];
+  if (staged) args.push("--cached");
+  let gitPath: string | undefined;
+  if (input.path) {
+    const resolvedPath = await normalizeUserRelativePathForGit(workspace, input.path);
+    gitPath = resolvedPath.relativePath;
+    args.push("--", gitPath);
+  }
+
+  const result = await runGit(root.realPath, args, LIMITS.gitDiff.timeoutMs, maxBytes);
+  if (result.exitCode !== 0 && isNotGitRepository(result.stderr)) {
+    fail("GIT_COMMAND_FAILED", "Workspace is not a Git repository", { code: "NOT_GIT_REPOSITORY" });
+  }
+  if (result.exitCode !== 0) {
+    fail("GIT_COMMAND_FAILED", "Git diff failed", { stderr: trimError(result.stderr) });
+  }
+
+  return {
+    ...(gitPath ? { path: gitPath } : {}),
+    staged,
+    diff: result.stdout,
+    truncated: result.truncated
+  };
+}
+
 async function* walk(
   workspace: WorkspaceConfig,
   root: string,
@@ -331,4 +405,171 @@ function matchesGlob(relativePath: string, globs?: string[]): boolean {
     if (glob.startsWith("*.")) return relativePath.endsWith(glob.slice(1));
     return relativePath.includes(glob.replaceAll("*", ""));
   });
+}
+
+async function runGit(
+  cwd: string,
+  args: string[],
+  timeoutMs: number,
+  maxStdoutBytes: number
+): Promise<{ stdout: string; stderr: string; exitCode: number; truncated: boolean }> {
+  try {
+    const { stdout, stderr } = await execFileAsync("git", ["-C", cwd, ...args], {
+      timeout: timeoutMs,
+      maxBuffer: maxStdoutBytes + 64 * 1024,
+      encoding: "utf8"
+    });
+    return truncateGitOutput(stdout, stderr, 0, maxStdoutBytes);
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException & {
+      stdout?: string;
+      stderr?: string;
+      code?: number | string;
+      killed?: boolean;
+      signal?: string;
+    };
+    if (err.killed || err.signal === "SIGTERM" || err.code === "ETIMEDOUT") {
+      fail("GIT_TIMEOUT", "Git command timed out");
+    }
+    if (err.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+      return truncateGitOutput(String(err.stdout ?? ""), String(err.stderr ?? ""), 0, maxStdoutBytes);
+    }
+    return truncateGitOutput(String(err.stdout ?? ""), String(err.stderr ?? err.message ?? ""), numericExitCode(err.code), maxStdoutBytes);
+  }
+}
+
+function truncateGitOutput(stdout: string, stderr: string, exitCode: number, maxStdoutBytes: number) {
+  const encoded = Buffer.from(stdout, "utf8");
+  if (encoded.byteLength <= maxStdoutBytes) {
+    return { stdout, stderr, exitCode, truncated: false };
+  }
+  return {
+    stdout: encoded.subarray(0, maxStdoutBytes).toString("utf8"),
+    stderr,
+    exitCode,
+    truncated: true
+  };
+}
+
+function numericExitCode(code: number | string | undefined): number {
+  return typeof code === "number" ? code : 1;
+}
+
+function isNotGitRepository(stderr: string): boolean {
+  const normalized = stderr.toLowerCase();
+  return normalized.includes("not a git repository") ||
+    normalized.includes("not in a git directory") ||
+    normalized.includes("不是 git 仓库");
+}
+
+function trimError(value: string): string {
+  return value.trim().slice(0, 1000);
+}
+
+function parsePorcelainV2Status(stdout: string, maxFiles: number) {
+  const files: Array<{
+    path: string;
+    status: "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked" | "unmerged";
+    staged: boolean;
+    unstaged: boolean;
+    oldPath?: string;
+  }> = [];
+  let branch: string | undefined;
+  let head: string | undefined;
+  let upstream: string | undefined;
+  let ahead: number | undefined;
+  let behind: number | undefined;
+  let truncated = false;
+
+  for (const line of stdout.split("\n")) {
+    if (!line) continue;
+    if (line.startsWith("# ")) {
+      const branchInfo = parseBranchLine(line);
+      branch = branchInfo.branch ?? branch;
+      head = branchInfo.head ?? head;
+      upstream = branchInfo.upstream ?? upstream;
+      ahead = branchInfo.ahead ?? ahead;
+      behind = branchInfo.behind ?? behind;
+      continue;
+    }
+
+    const change = parseStatusLine(line);
+    if (!change) continue;
+    if (files.length >= maxFiles) {
+      truncated = true;
+      continue;
+    }
+    files.push(change);
+  }
+
+  return { branch, head, upstream, ahead, behind, files, truncated };
+}
+
+function parseBranchLine(line: string): {
+  branch?: string;
+  head?: string;
+  upstream?: string;
+  ahead?: number;
+  behind?: number;
+} {
+  if (line.startsWith("# branch.oid ")) return { head: line.slice("# branch.oid ".length) };
+  if (line.startsWith("# branch.head ")) {
+    const value = line.slice("# branch.head ".length);
+    return value === "(detached)" ? {} : { branch: value };
+  }
+  if (line.startsWith("# branch.upstream ")) return { upstream: line.slice("# branch.upstream ".length) };
+  if (line.startsWith("# branch.ab ")) {
+    const match = /^\# branch\.ab \+(\d+) -(\d+)$/.exec(line);
+    return match ? { ahead: Number(match[1]), behind: Number(match[2]) } : {};
+  }
+  return {};
+}
+
+function parseStatusLine(line: string): {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked" | "unmerged";
+  staged: boolean;
+  unstaged: boolean;
+  oldPath?: string;
+} | undefined {
+  if (line.startsWith("? ")) {
+    return { path: line.slice(2), status: "untracked", staged: false, unstaged: true };
+  }
+  if (line.startsWith("u ")) {
+    const parts = line.split(" ");
+    return { path: parts.slice(10).join(" "), status: "unmerged", staged: true, unstaged: true };
+  }
+  if (line.startsWith("1 ")) {
+    const parts = line.split(" ");
+    const xy = parts[1] ?? "..";
+    return {
+      path: parts.slice(8).join(" "),
+      status: statusFromCodes(xy),
+      staged: xy[0] !== ".",
+      unstaged: xy[1] !== "."
+    };
+  }
+  if (line.startsWith("2 ")) {
+    const parts = line.split(" ");
+    const xy = parts[1] ?? "..";
+    const pathPart = parts.slice(9).join(" ");
+    const [pathValue, oldPath] = pathPart.split("\t");
+    if (!pathValue) return undefined;
+    return {
+      path: pathValue,
+      ...(oldPath ? { oldPath } : {}),
+      status: xy[0] === "C" ? "copied" : "renamed",
+      staged: true,
+      unstaged: xy[1] !== "."
+    };
+  }
+  return undefined;
+}
+
+function statusFromCodes(xy: string): "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked" | "unmerged" {
+  if (xy.includes("A")) return "added";
+  if (xy.includes("D")) return "deleted";
+  if (xy.includes("R")) return "renamed";
+  if (xy.includes("C")) return "copied";
+  return "modified";
 }

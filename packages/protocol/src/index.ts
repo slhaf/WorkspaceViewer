@@ -7,7 +7,9 @@ export const WORKSPACE_TOOL_NAMES = [
   "listTree",
   "inspectFile",
   "searchFile",
-  "batchExec"
+  "batchExec",
+  "describeWorkspaceChanges",
+  "inspectWorkspaceDiff"
 ] as const;
 
 export const AGENT_TOOL_NAMES = [
@@ -15,11 +17,25 @@ export const AGENT_TOOL_NAMES = [
   "listTree",
   "inspectFile",
   "searchFile",
-  "batchExec"
+  "batchExec",
+  "describeWorkspaceChanges",
+  "inspectWorkspaceDiff"
+] as const;
+
+export const CONTEXT7_TOOL_NAMES = [
+  "context7ResolveLibraryId",
+  "context7QueryDocs"
+] as const;
+
+export const ACTION_TOOL_NAMES = [
+  ...WORKSPACE_TOOL_NAMES,
+  ...CONTEXT7_TOOL_NAMES
 ] as const;
 
 export type WorkspaceToolName = (typeof WORKSPACE_TOOL_NAMES)[number];
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
+export type Context7ToolName = (typeof CONTEXT7_TOOL_NAMES)[number];
+export type ActionToolName = (typeof ACTION_TOOL_NAMES)[number];
 
 export const OAUTH_SCOPE = "workspace.access" as const;
 
@@ -49,6 +65,26 @@ export const LIMITS = {
     maxTotalTimeoutMs: 10000,
     maxUncompressedResultBytes: 512 * 1024
   },
+  gitStatus: {
+    maxFiles: 100,
+    timeoutMs: 3000,
+    maxUncompressedResultBytes: 128 * 1024
+  },
+  gitDiff: {
+    maxBytes: 128 * 1024,
+    timeoutMs: 3000,
+    maxUncompressedResultBytes: 192 * 1024
+  },
+  context7: {
+    maxQueryLength: 512,
+    maxLibraryNameLength: 200,
+    maxLibraryIdLength: 300,
+    maxResults: 10,
+    defaultMaxChars: 40_000,
+    maxChars: 80_000,
+    timeoutMs: 8000,
+    maxUncompressedResultBytes: 128 * 1024
+  },
   relay: {
     maxCompressedPayloadBytes: 512 * 1024,
     maxUncompressedPayloadBytes: 1024 * 1024,
@@ -67,6 +103,13 @@ export const workspaceToolErrorCodeSchema = z.enum([
   "SEARCH_TIMEOUT",
   "RESULT_TOO_LARGE",
   "TOOL_TIMEOUT",
+  "GIT_COMMAND_FAILED",
+  "GIT_TIMEOUT",
+  "CONTEXT7_NOT_CONFIGURED",
+  "CONTEXT7_AUTH_FAILED",
+  "CONTEXT7_RATE_LIMITED",
+  "CONTEXT7_UPSTREAM_ERROR",
+  "CONTEXT7_RESULT_TOO_LARGE",
   "INTERNAL_ERROR"
 ]);
 
@@ -256,25 +299,171 @@ export const batchExecResultSchema = z.object({
   }))
 });
 
-export const inputSchemas = {
+export const describeWorkspaceChangesInputSchema = z.object({
+  workspaceId: z.string(),
+  includeUntracked: z.boolean().optional(),
+  maxFiles: z.number().int().min(1).max(LIMITS.gitStatus.maxFiles).optional()
+});
+
+export const workspaceChangeStatusSchema = z.enum([
+  "added",
+  "modified",
+  "deleted",
+  "renamed",
+  "copied",
+  "untracked",
+  "unmerged"
+]);
+
+export const describeWorkspaceChangesResultSchema = z.object({
+  isGitRepository: z.boolean(),
+  branch: z.string().optional(),
+  head: z.string().optional(),
+  upstream: z.string().optional(),
+  ahead: z.number().int().optional(),
+  behind: z.number().int().optional(),
+  files: z.array(z.object({
+    path: z.string(),
+    status: workspaceChangeStatusSchema,
+    staged: z.boolean(),
+    unstaged: z.boolean(),
+    oldPath: z.string().optional()
+  })),
+  truncated: z.boolean()
+});
+
+export const inspectWorkspaceDiffInputSchema = z.object({
+  workspaceId: z.string(),
+  path: z.string().optional(),
+  staged: z.boolean().optional(),
+  maxBytes: z.number().int().min(1).max(LIMITS.gitDiff.maxBytes).optional()
+});
+
+export const inspectWorkspaceDiffResultSchema = z.object({
+  path: z.string().optional(),
+  staged: z.boolean(),
+  diff: z.string(),
+  truncated: z.boolean()
+});
+
+export const context7ResolveLibraryIdInputSchema = z.object({
+  libraryName: z.string().min(1).max(LIMITS.context7.maxLibraryNameLength),
+  query: z.string().min(1).max(LIMITS.context7.maxQueryLength),
+  maxResults: z.number().int().min(1).max(LIMITS.context7.maxResults).optional()
+});
+
+export const context7ResolveLibraryIdResultSchema = z.object({
+  results: z.array(z.object({
+    libraryId: z.string(),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    totalSnippets: z.number().int().nonnegative().optional(),
+    trustScore: z.number().optional(),
+    tokens: z.number().int().nonnegative().optional()
+  })),
+  selected: z.object({
+    libraryId: z.string(),
+    reason: z.string().optional()
+  }).optional(),
+  truncated: z.boolean()
+});
+
+export const context7QueryDocsInputSchema = z.object({
+  libraryId: z.string().min(1).max(LIMITS.context7.maxLibraryIdLength),
+  query: z.string().min(1).max(LIMITS.context7.maxQueryLength),
+  type: z.enum(["json", "txt"]).optional(),
+  fast: z.boolean().optional(),
+  maxChars: z.number().int().min(1).max(LIMITS.context7.maxChars).optional()
+});
+
+export const context7QueryDocsResultSchema = z.object({
+  libraryId: z.string(),
+  query: z.string(),
+  type: z.enum(["json", "txt"]),
+  content: z.string().optional(),
+  codeSnippets: z.array(z.object({
+    title: z.string().optional(),
+    description: z.string().optional(),
+    language: z.string().optional(),
+    code: z.string().optional(),
+    source: z.string().optional()
+  })).optional(),
+  infoSnippets: z.array(z.object({
+    title: z.string().optional(),
+    breadcrumb: z.string().optional(),
+    content: z.string(),
+    source: z.string().optional()
+  })).optional(),
+  rules: z.unknown().optional(),
+  truncated: z.boolean()
+});
+
+export const workspaceInputSchemas = {
   listWorkspaces: listWorkspacesInputSchema,
   createAgentPairingCode: createAgentPairingCodeInputSchema,
   describeWorkspace: describeWorkspaceInputSchema,
   listTree: listTreeInputSchema,
   inspectFile: inspectFileInputSchema,
   searchFile: searchFileInputSchema,
-  batchExec: batchExecInputSchema
+  batchExec: batchExecInputSchema,
+  describeWorkspaceChanges: describeWorkspaceChangesInputSchema,
+  inspectWorkspaceDiff: inspectWorkspaceDiffInputSchema
 } as const;
 
-export const resultSchemas = {
+export const workspaceResultSchemas = {
   listWorkspaces: listWorkspacesResultSchema,
   createAgentPairingCode: createAgentPairingCodeResultSchema,
   describeWorkspace: describeWorkspaceResultSchema,
   listTree: listTreeResultSchema,
   inspectFile: inspectFileResultSchema,
   searchFile: searchFileResultSchema,
-  batchExec: batchExecResultSchema
+  batchExec: batchExecResultSchema,
+  describeWorkspaceChanges: describeWorkspaceChangesResultSchema,
+  inspectWorkspaceDiff: inspectWorkspaceDiffResultSchema
 } as const;
+
+export const context7InputSchemas = {
+  context7ResolveLibraryId: context7ResolveLibraryIdInputSchema,
+  context7QueryDocs: context7QueryDocsInputSchema
+} as const;
+
+export const context7ResultSchemas = {
+  context7ResolveLibraryId: context7ResolveLibraryIdResultSchema,
+  context7QueryDocs: context7QueryDocsResultSchema
+} as const;
+
+export const actionInputSchemas = {
+  ...workspaceInputSchemas,
+  ...context7InputSchemas
+} as const;
+
+export const actionResultSchemas = {
+  ...workspaceResultSchemas,
+  ...context7ResultSchemas
+} as const;
+
+export const agentInputSchemas = {
+  describeWorkspace: describeWorkspaceInputSchema,
+  listTree: listTreeInputSchema,
+  inspectFile: inspectFileInputSchema,
+  searchFile: searchFileInputSchema,
+  batchExec: batchExecInputSchema,
+  describeWorkspaceChanges: describeWorkspaceChangesInputSchema,
+  inspectWorkspaceDiff: inspectWorkspaceDiffInputSchema
+} as const;
+
+export const agentResultSchemas = {
+  describeWorkspace: describeWorkspaceResultSchema,
+  listTree: listTreeResultSchema,
+  inspectFile: inspectFileResultSchema,
+  searchFile: searchFileResultSchema,
+  batchExec: batchExecResultSchema,
+  describeWorkspaceChanges: describeWorkspaceChangesResultSchema,
+  inspectWorkspaceDiff: inspectWorkspaceDiffResultSchema
+} as const;
+
+export const inputSchemas = actionInputSchemas;
+export const resultSchemas = actionResultSchemas;
 
 export const agentToolRequestSchema = z.object({
   type: z.literal("tool_request"),

@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   batchExecInputSchema,
+  ACTION_TOOL_NAMES,
+  AGENT_TOOL_NAMES,
   completeAgentPairingRequestSchema,
+  context7QueryDocsInputSchema,
+  context7ResolveLibraryIdInputSchema,
   createAgentPairingCodeResultSchema,
+  describeWorkspaceChangesInputSchema,
+  inspectWorkspaceDiffInputSchema,
   listTreeInputSchema,
   OAUTH_SCOPE,
   searchFileInputSchema,
@@ -69,5 +75,33 @@ describe("protocol schemas", () => {
     }).pairingCode).toBe("ABCD-EFGH");
     expect(unpairAgentRequestSchema.parse({ agentId: "agent_test" }).agentId).toBe("agent_test");
     expect(unpairAgentResponseSchema.parse({ ok: true }).ok).toBe(true);
+  });
+
+  it("declares Git and Context7 tool boundaries", () => {
+    expect(AGENT_TOOL_NAMES).toContain("describeWorkspaceChanges");
+    expect(AGENT_TOOL_NAMES).toContain("inspectWorkspaceDiff");
+    expect(AGENT_TOOL_NAMES).not.toContain("context7QueryDocs");
+    expect(ACTION_TOOL_NAMES).toContain("context7ResolveLibraryId");
+    expect(ACTION_TOOL_NAMES).toContain("context7QueryDocs");
+  });
+
+  it("caps Git and Context7 inputs", () => {
+    expect(() => describeWorkspaceChangesInputSchema.parse({
+      workspaceId: "ws",
+      maxFiles: 999
+    })).toThrow();
+    expect(() => inspectWorkspaceDiffInputSchema.parse({
+      workspaceId: "ws",
+      maxBytes: 999999999
+    })).toThrow();
+    expect(() => context7ResolveLibraryIdInputSchema.parse({
+      libraryName: "react",
+      query: "hooks",
+      maxResults: 999
+    })).toThrow();
+    expect(() => context7QueryDocsInputSchema.parse({
+      libraryId: "/facebook/react",
+      query: "x".repeat(9999)
+    })).toThrow();
   });
 });

@@ -20,6 +20,9 @@ describe("mcp metadata", () => {
     }
     expect(json.tools.find((tool) => tool.name === "createAgentPairingCode")?.annotations.readOnlyHint).toBe(false);
     expect(json.tools.find((tool) => tool.name === "inspectFile")?.annotations.readOnlyHint).toBe(true);
+    expect(json.tools.find((tool) => tool.name === "describeWorkspaceChanges")?.annotations.readOnlyHint).toBe(true);
+    expect(json.tools.find((tool) => tool.name === "inspectWorkspaceDiff")?.annotations.readOnlyHint).toBe(true);
+    expect(json.tools.some((tool) => tool.name.startsWith("context7"))).toBe(false);
   });
 
   it("returns an OAuth challenge for unauthenticated tool calls", async () => {

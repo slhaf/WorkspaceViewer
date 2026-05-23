@@ -1,7 +1,6 @@
 import {
   LIMITS,
-  OAUTH_SCOPE,
-  inputSchemas
+  OAUTH_SCOPE
 } from "@workspace-viewer/protocol";
 import type { Env } from "./env.js";
 import { oauthChallenge, type OAuthProps, resolveUser } from "./auth.js";
@@ -26,7 +25,9 @@ const toolDescriptions: Record<string, string> = {
   listTree: "Use this when you need to inspect a workspace directory tree.",
   inspectFile: "Use this when you need to read a bounded range from a text file.",
   searchFile: "Use this when you need to search by path or file content inside a workspace.",
-  batchExec: "Use this when you need to run several read-only workspace inspections in one call."
+  batchExec: "Use this when you need to run several read-only workspace inspections in one call.",
+  describeWorkspaceChanges: "Use this when you need to summarize Git changes in a local workspace.",
+  inspectWorkspaceDiff: "Use this when you need to read a bounded Git diff from a local workspace."
 };
 
 const toolInputSchemas: Record<string, JsonSchema> = {
@@ -90,7 +91,18 @@ const toolInputSchemas: Record<string, JsonSchema> = {
         ]
       }
     }
-  }, ["workspaceId", "operations"])
+  }, ["workspaceId", "operations"]),
+  describeWorkspaceChanges: objectSchema({
+    workspaceId: { type: "string" },
+    includeUntracked: { type: "boolean" },
+    maxFiles: { type: "integer", minimum: 1, maximum: LIMITS.gitStatus.maxFiles }
+  }, ["workspaceId"]),
+  inspectWorkspaceDiff: objectSchema({
+    workspaceId: { type: "string" },
+    path: { type: "string" },
+    staged: { type: "boolean" },
+    maxBytes: { type: "integer", minimum: 1, maximum: LIMITS.gitDiff.maxBytes }
+  }, ["workspaceId"])
 };
 
 const workspaceToolErrorOutputSchema = objectSchema({
@@ -107,6 +119,8 @@ const workspaceToolErrorOutputSchema = objectSchema({
       "SEARCH_TIMEOUT",
       "RESULT_TOO_LARGE",
       "TOOL_TIMEOUT",
+      "GIT_COMMAND_FAILED",
+      "GIT_TIMEOUT",
       "INTERNAL_ERROR"
     ]
   },
@@ -214,7 +228,32 @@ const toolOutputSchemas: Record<string, JsonSchema> = {
         error: workspaceToolErrorOutputSchema
       }, ["id", "ok"])
     }
-  }, ["results"])
+  }, ["results"]),
+  describeWorkspaceChanges: objectSchema({
+    isGitRepository: { type: "boolean" },
+    branch: { type: "string" },
+    head: { type: "string" },
+    upstream: { type: "string" },
+    ahead: { type: "integer" },
+    behind: { type: "integer" },
+    files: {
+      type: "array",
+      items: objectSchema({
+        path: { type: "string" },
+        status: { type: "string", enum: ["added", "modified", "deleted", "renamed", "copied", "untracked", "unmerged"] },
+        staged: { type: "boolean" },
+        unstaged: { type: "boolean" },
+        oldPath: { type: "string" }
+      }, ["path", "status", "staged", "unstaged"])
+    },
+    truncated: { type: "boolean" }
+  }, ["isGitRepository", "files", "truncated"]),
+  inspectWorkspaceDiff: objectSchema({
+    path: { type: "string" },
+    staged: { type: "boolean" },
+    diff: { type: "string" },
+    truncated: { type: "boolean" }
+  }, ["staged", "diff", "truncated"])
 };
 
 export async function handleMcp(request: Request, env: Env, props?: OAuthProps): Promise<Response> {
@@ -298,7 +337,7 @@ function toolDescriptor(name: string, description: string): {
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
   securitySchemes: Array<{ type: "oauth2"; scopes: string[] }>;
-  annotations: { readOnlyHint: boolean; destructiveHint: false; openWorldHint: false };
+  annotations: { readOnlyHint: boolean; destructiveHint: false; openWorldHint: boolean };
 } {
   return {
     name,
@@ -335,7 +374,7 @@ function securitySchemes(): Array<{ type: "oauth2"; scopes: string[] }> {
   return [{ type: "oauth2", scopes: [OAUTH_SCOPE] }];
 }
 
-function toolAnnotations(name: string): { readOnlyHint: boolean; destructiveHint: false; openWorldHint: false } {
+function toolAnnotations(name: string): { readOnlyHint: boolean; destructiveHint: false; openWorldHint: boolean } {
   return {
     readOnlyHint: name !== "createAgentPairingCode",
     destructiveHint: false,

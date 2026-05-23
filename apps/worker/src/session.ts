@@ -224,7 +224,7 @@ export class AgentSession extends DurableObject<Env> {
       return;
     }
 
-    if (message.type === "agent_ping") {
+    if ((message as { type: string }).type === "agent_ping") {
       await touchAgent(this.env.DB, attachment.agentId);
       return;
     }

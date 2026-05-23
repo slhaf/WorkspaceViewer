@@ -22,6 +22,14 @@ describe("gpt actions", () => {
     expect(json.paths["/actions/v1/create-agent-pairing-code"]?.post.operationId).toBe("createAgentPairingCode");
     expect(json.paths["/actions/v1/create-agent-pairing-code"]?.post["x-openai-isConsequential"]).toBe(true);
     expect(json.paths["/actions/v1/inspect-file"]?.post["x-openai-isConsequential"]).toBe(false);
+    expect(json.paths["/actions/v1/describe-workspace-changes"]?.post.operationId).toBe("describeWorkspaceChanges");
+    expect(json.paths["/actions/v1/describe-workspace-changes"]?.post["x-openai-isConsequential"]).toBe(false);
+    expect(json.paths["/actions/v1/inspect-workspace-diff"]?.post.operationId).toBe("inspectWorkspaceDiff");
+    expect(json.paths["/actions/v1/inspect-workspace-diff"]?.post["x-openai-isConsequential"]).toBe(false);
+    expect(json.paths["/actions/v1/context7/resolve-library-id"]?.post.operationId).toBe("context7ResolveLibraryId");
+    expect(json.paths["/actions/v1/context7/resolve-library-id"]?.post["x-openai-isConsequential"]).toBe(false);
+    expect(json.paths["/actions/v1/context7/query-docs"]?.post.operationId).toBe("context7QueryDocs");
+    expect(json.paths["/actions/v1/context7/query-docs"]?.post["x-openai-isConsequential"]).toBe(false);
   });
 
   it("rejects direct action calls without OAuth props", async () => {
@@ -51,6 +59,20 @@ describe("gpt actions", () => {
     expect(response.status).toBe(200);
     expect(json.pairingCode).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
     expect(json.commandHint).toBe(`workspace-viewer-agent pair ${json.pairingCode}`);
+  });
+
+  it("returns structured Context7 configuration errors", async () => {
+    const response = await handleActionsApi(new Request("https://worker.example.com/actions/v1/context7/query-docs", {
+      method: "POST",
+      body: JSON.stringify({ libraryId: "/facebook/react", query: "hooks" })
+    }), {} as Env, { userId: "user_test" });
+    const json = await response.json<{ error: { code: string; message: string } }>();
+
+    expect(response.status).toBe(500);
+    expect(json.error).toEqual({
+      code: "CONTEXT7_NOT_CONFIGURED",
+      message: "CONTEXT7_API_KEY is not configured"
+    });
   });
 });
 

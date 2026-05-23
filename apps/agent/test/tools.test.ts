@@ -1,9 +1,13 @@
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "../src/config.js";
 import { executeTool } from "../src/tools.js";
+
+const execFileAsync = promisify(execFile);
 
 async function makeConfig(): Promise<{ config: AgentConfig; root: string; outside: string }> {
   const base = path.join(tmpdir(), `workspace-viewer-${crypto.randomUUID()}`);
@@ -85,4 +89,86 @@ describe("agent tools", () => {
     expect(result.results[0]).toMatchObject({ id: "ok", ok: true });
     expect(result.results[1]).toMatchObject({ id: "bad", ok: false, error: { code: "FILE_NOT_FOUND" } });
   });
+
+  it("returns non-Git status without throwing", async () => {
+    const { config } = await makeConfig();
+    const result = await executeTool(config, "describeWorkspaceChanges", {
+      workspaceId: "ws_dev"
+    }) as { isGitRepository: boolean; files: unknown[]; truncated: boolean };
+
+    expect(result).toEqual({ isGitRepository: false, files: [], truncated: false });
+  });
+
+  it("summarizes Git changes and bounded diffs", async () => {
+    const { config, root } = await makeConfig();
+    await git(root, "init");
+    await git(root, "config", "user.email", "test@example.com");
+    await git(root, "config", "user.name", "Test User");
+    await git(root, "add", "src/index.ts");
+    await git(root, "commit", "-m", "initial");
+    await writeFile(path.join(root, "src", "index.ts"), "alpha\nchanged\nomega\n");
+    await writeFile(path.join(root, "src", "staged.ts"), "staged\n");
+    await git(root, "add", "src/staged.ts");
+    await writeFile(path.join(root, "src", "untracked.ts"), "new\n");
+
+    const changes = await executeTool(config, "describeWorkspaceChanges", {
+      workspaceId: "ws_dev",
+      includeUntracked: true
+    }) as {
+      isGitRepository: boolean;
+      files: Array<{ path: string; status: string; staged: boolean; unstaged: boolean }>;
+    };
+
+    expect(changes.isGitRepository).toBe(true);
+    expect(changes.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "src/index.ts", status: "modified", staged: false, unstaged: true }),
+      expect.objectContaining({ path: "src/staged.ts", status: "added", staged: true, unstaged: false }),
+      expect.objectContaining({ path: "src/untracked.ts", status: "untracked", staged: false, unstaged: true })
+    ]));
+
+    const diff = await executeTool(config, "inspectWorkspaceDiff", {
+      workspaceId: "ws_dev",
+      path: "src/index.ts"
+    }) as { path: string; staged: boolean; diff: string; truncated: boolean };
+    expect(diff.path).toBe("src/index.ts");
+    expect(diff.staged).toBe(false);
+    expect(diff.diff).toContain("-needle here");
+    expect(diff.diff).toContain("+changed");
+
+    const staged = await executeTool(config, "inspectWorkspaceDiff", {
+      workspaceId: "ws_dev",
+      path: "src/staged.ts",
+      staged: true
+    }) as { diff: string };
+    expect(staged.diff).toContain("+staged");
+  });
+
+  it("guards Git diff paths without requiring the file to exist", async () => {
+    const { config, root } = await makeConfig();
+    await git(root, "init");
+    await git(root, "config", "user.email", "test@example.com");
+    await git(root, "config", "user.name", "Test User");
+    await git(root, "add", "src/index.ts");
+    await git(root, "commit", "-m", "initial");
+    await rm(path.join(root, "src", "index.ts"));
+
+    const deleted = await executeTool(config, "inspectWorkspaceDiff", {
+      workspaceId: "ws_dev",
+      path: "src/index.ts"
+    }) as { diff: string };
+    expect(deleted.diff).toContain("deleted file");
+
+    await expect(executeTool(config, "inspectWorkspaceDiff", {
+      workspaceId: "ws_dev",
+      path: "../outside/secret.txt"
+    })).rejects.toMatchObject({ toolError: { code: "PATH_OUTSIDE_WORKSPACE" } });
+    await expect(executeTool(config, "inspectWorkspaceDiff", {
+      workspaceId: "ws_dev",
+      path: "node_modules/hidden.txt"
+    })).rejects.toMatchObject({ toolError: { code: "PATH_IGNORED" } });
+  });
 });
+
+async function git(cwd: string, ...args: string[]) {
+  await execFileAsync("git", ["-C", cwd, ...args]);
+}

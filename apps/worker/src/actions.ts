@@ -1,7 +1,7 @@
 import { LIMITS, OAUTH_SCOPE } from "@workspace-viewer/protocol";
 import { ZodError } from "zod";
 import type { OAuthProps } from "./auth.js";
-import { callWorkspaceTool } from "./workspaceTools.js";
+import { callTool } from "./tools.js";
 import type { Env } from "./env.js";
 
 const ACTION_RESULT_MAX_CHARS = 90_000;
@@ -13,7 +13,11 @@ const routes: Record<string, string> = {
     "/actions/v1/list-tree": "listTree",
     "/actions/v1/inspect-file": "inspectFile",
     "/actions/v1/search-file": "searchFile",
-    "/actions/v1/batch-exec": "batchExec"
+    "/actions/v1/batch-exec": "batchExec",
+    "/actions/v1/describe-workspace-changes": "describeWorkspaceChanges",
+    "/actions/v1/inspect-workspace-diff": "inspectWorkspaceDiff",
+    "/actions/v1/context7/resolve-library-id": "context7ResolveLibraryId",
+    "/actions/v1/context7/query-docs": "context7QueryDocs"
 };
 
 export async function handleActionsApi(request: Request, env: Env, props?: OAuthProps): Promise<Response> {
@@ -39,7 +43,7 @@ export async function handleActionsApi(request: Request, env: Env, props?: OAuth
 
     try {
         const input = await readJson(request);
-        const result = await callWorkspaceTool(env, userId, toolName, input);
+        const result = await callTool(env, userId, toolName, input);
         const response = json(trimForActions(result));
         console.log("Action success", {
             toolName,
@@ -52,6 +56,9 @@ export async function handleActionsApi(request: Request, env: Env, props?: OAuth
             errorType: error instanceof Error ? error.name : typeof error,
             message: error instanceof Error ? error.message : String(error)
         });
+        if (isToolError(error)) {
+            return json({ error }, 500);
+        }
         if (error instanceof SyntaxError) {
             return json({ error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } }, 400);
         }
@@ -146,6 +153,34 @@ export function actionOpenApi(request: Request, env: Env): Response {
                 requestSchema: "BatchExecInput",
                 responseSchema: "BatchExecResult",
                 consequential: false
+            }),
+            "/actions/v1/describe-workspace-changes": postOperation({
+                operationId: "describeWorkspaceChanges",
+                summary: "Summarize Git changes in a local workspace",
+                requestSchema: "DescribeWorkspaceChangesInput",
+                responseSchema: "DescribeWorkspaceChangesResult",
+                consequential: false
+            }),
+            "/actions/v1/inspect-workspace-diff": postOperation({
+                operationId: "inspectWorkspaceDiff",
+                summary: "Read a bounded Git diff from a local workspace",
+                requestSchema: "InspectWorkspaceDiffInput",
+                responseSchema: "InspectWorkspaceDiffResult",
+                consequential: false
+            }),
+            "/actions/v1/context7/resolve-library-id": postOperation({
+                operationId: "context7ResolveLibraryId",
+                summary: "Resolve a Context7 library ID",
+                requestSchema: "Context7ResolveLibraryIdInput",
+                responseSchema: "Context7ResolveLibraryIdResult",
+                consequential: false
+            }),
+            "/actions/v1/context7/query-docs": postOperation({
+                operationId: "context7QueryDocs",
+                summary: "Query Context7 documentation for a library",
+                requestSchema: "Context7QueryDocsInput",
+                responseSchema: "Context7QueryDocsResult",
+                consequential: false
             })
         }
     });
@@ -194,6 +229,17 @@ function json(body: unknown, status = 200): Response {
             "cache-control": "no-store"
         }
     });
+}
+
+function isToolError(value: unknown): value is { code: string; message: string; details?: Record<string, unknown> } {
+    return Boolean(
+        value &&
+        typeof value === "object" &&
+        "code" in value &&
+        typeof (value as { code?: unknown }).code === "string" &&
+        "message" in value &&
+        typeof (value as { message?: unknown }).message === "string"
+    );
 }
 
 function postOperation(options: {
@@ -369,6 +415,99 @@ function actionSchemas(): Record<string, unknown> {
                     error: { type: "object", additionalProperties: true }
                 }, ["id", "ok"])
             }
-        }, ["results"])
+        }, ["results"]),
+        DescribeWorkspaceChangesInput: objectSchema({
+            workspaceId,
+            includeUntracked: { type: "boolean" },
+            maxFiles: { type: "integer", minimum: 1, maximum: LIMITS.gitStatus.maxFiles }
+        }, ["workspaceId"]),
+        DescribeWorkspaceChangesResult: objectSchema({
+            isGitRepository: { type: "boolean" },
+            branch: { type: "string" },
+            head: { type: "string" },
+            upstream: { type: "string" },
+            ahead: { type: "integer" },
+            behind: { type: "integer" },
+            files: {
+                type: "array",
+                items: objectSchema({
+                    path: { type: "string" },
+                    status: { type: "string", enum: ["added", "modified", "deleted", "renamed", "copied", "untracked", "unmerged"] },
+                    staged: { type: "boolean" },
+                    unstaged: { type: "boolean" },
+                    oldPath: { type: "string" }
+                }, ["path", "status", "staged", "unstaged"])
+            },
+            truncated: { type: "boolean" }
+        }, ["isGitRepository", "files", "truncated"]),
+        InspectWorkspaceDiffInput: objectSchema({
+            workspaceId,
+            path: { type: "string" },
+            staged: { type: "boolean" },
+            maxBytes: { type: "integer", minimum: 1, maximum: LIMITS.gitDiff.maxBytes }
+        }, ["workspaceId"]),
+        InspectWorkspaceDiffResult: objectSchema({
+            path: { type: "string" },
+            staged: { type: "boolean" },
+            diff: { type: "string" },
+            truncated: { type: "boolean" }
+        }, ["staged", "diff", "truncated"]),
+        Context7ResolveLibraryIdInput: objectSchema({
+            libraryName: { type: "string", minLength: 1, maxLength: LIMITS.context7.maxLibraryNameLength },
+            query: { type: "string", minLength: 1, maxLength: LIMITS.context7.maxQueryLength },
+            maxResults: { type: "integer", minimum: 1, maximum: LIMITS.context7.maxResults }
+        }, ["libraryName", "query"]),
+        Context7ResolveLibraryIdResult: objectSchema({
+            results: {
+                type: "array",
+                items: objectSchema({
+                    libraryId: { type: "string" },
+                    title: { type: "string" },
+                    description: { type: "string" },
+                    totalSnippets: { type: "integer", minimum: 0 },
+                    trustScore: { type: "number" },
+                    tokens: { type: "integer", minimum: 0 }
+                }, ["libraryId"])
+            },
+            selected: objectSchema({
+                libraryId: { type: "string" },
+                reason: { type: "string" }
+            }, ["libraryId"]),
+            truncated: { type: "boolean" }
+        }, ["results", "truncated"]),
+        Context7QueryDocsInput: objectSchema({
+            libraryId: { type: "string", minLength: 1, maxLength: LIMITS.context7.maxLibraryIdLength },
+            query: { type: "string", minLength: 1, maxLength: LIMITS.context7.maxQueryLength },
+            type: { type: "string", enum: ["json", "txt"] },
+            fast: { type: "boolean" },
+            maxChars: { type: "integer", minimum: 1, maximum: LIMITS.context7.maxChars }
+        }, ["libraryId", "query"]),
+        Context7QueryDocsResult: objectSchema({
+            libraryId: { type: "string" },
+            query: { type: "string" },
+            type: { type: "string", enum: ["json", "txt"] },
+            content: { type: "string" },
+            codeSnippets: {
+                type: "array",
+                items: objectSchema({
+                    title: { type: "string" },
+                    description: { type: "string" },
+                    language: { type: "string" },
+                    code: { type: "string" },
+                    source: { type: "string" }
+                })
+            },
+            infoSnippets: {
+                type: "array",
+                items: objectSchema({
+                    title: { type: "string" },
+                    breadcrumb: { type: "string" },
+                    content: { type: "string" },
+                    source: { type: "string" }
+                }, ["content"])
+            },
+            rules: {},
+            truncated: { type: "boolean" }
+        }, ["libraryId", "query", "type", "truncated"])
     };
 }

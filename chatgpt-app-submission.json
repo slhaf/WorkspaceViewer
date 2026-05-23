@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "Workspace Viewer",
     "subtitle": "Read local workspaces",
-    "description": "Workspace Viewer lets ChatGPT inspect user-approved local workspaces through a read-only Agent. Users can discover registered workspaces, summarize project structure, inspect text files, search paths or file contents, and batch several read-only workspace checks into one request. It also provides a pairing flow so users can connect their own local Agent before using workspace tools.",
+    "description": "Workspace Viewer lets ChatGPT inspect user-approved local workspaces through a read-only Agent. Users can discover registered workspaces, summarize project structure, inspect text files, search paths or file contents, review Git status and diffs, and batch several read-only workspace checks into one request. It also provides a pairing flow so users can connect their own local Agent before using workspace tools.",
     "category": "DEVELOPER_TOOLS"
   },
   "tools": {
@@ -91,6 +91,30 @@
         "open_world_justification": "Does not publish content or change public internet state or external third-party systems.",
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
+    },
+    "describeWorkspaceChanges": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads Git status metadata from the selected user-approved local workspace and does not modify files, index state, commits, or repository configuration.",
+        "open_world_justification": "Does not contact public internet services or change third-party or internet-visible state.",
+        "destructive_justification": "Does not delete, overwrite, stage, commit, reset, or perform irreversible actions."
+      }
+    },
+    "inspectWorkspaceDiff": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads a bounded Git diff from the selected user-approved local workspace and does not modify files, index state, commits, or repository configuration.",
+        "open_world_justification": "Does not contact public internet services or change third-party or internet-visible state.",
+        "destructive_justification": "Does not delete, overwrite, stage, commit, reset, or perform irreversible actions."
+      }
     }
   },
   "test_cases": [
@@ -148,6 +172,22 @@
       "file_attachment_urls": null,
       "tools_triggered": "batchExec",
       "expected_output": "Returns the combined results of several read-only workspace checks so the assistant can answer with fewer tool round trips.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Summarize local Git changes in a selected workspace.",
+      "user_prompt": "Show me what changed in this workspace before we review the diff.",
+      "file_attachment_urls": null,
+      "tools_triggered": "describeWorkspaceChanges",
+      "expected_output": "Returns a bounded summary of changed, staged, unstaged, and untracked workspace files without modifying Git state.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Inspect a bounded local Git diff for a selected workspace path.",
+      "user_prompt": "Show me the diff for apps/agent/src/tools.ts in this workspace.",
+      "file_attachment_urls": null,
+      "tools_triggered": "inspectWorkspaceDiff",
+      "expected_output": "Returns a bounded read-only Git diff for the requested workspace path and indicates if the result was truncated.",
       "expected_output_url": null
     }
   ],

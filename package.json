@@ -7,6 +7,8 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm --filter @workspace-viewer/protocol build && pnpm -r typecheck",
+    "agent:compile": "node scripts/build-agent-binaries.mjs",
+    "agent:compile:current": "node scripts/build-agent-binaries.mjs --current",
     "worker:dev": "pnpm --filter @workspace-viewer/worker dev",
     "agent:dev": "pnpm --filter @workspace-viewer/agent dev"
   },

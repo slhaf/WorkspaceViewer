@@ -12,6 +12,12 @@ export interface ResolvedWorkspacePath {
   relativePath: string;
 }
 
+export interface ResolvedGitPath {
+  rootRealPath: string;
+  absolutePath: string;
+  relativePath: string;
+}
+
 export async function resolveWorkspacePath(
   workspace: WorkspaceConfig,
   userPath = "."
@@ -42,6 +48,34 @@ export async function resolveWorkspacePath(
   }
 
   return { rootRealPath, absolutePath, realPath: realTarget, relativePath };
+}
+
+export async function normalizeUserRelativePathForGit(
+  workspace: WorkspaceConfig,
+  userPath: string
+): Promise<ResolvedGitPath> {
+  if (!userPath || userPath === ".") {
+    fail("INVALID_PARAMS", "Git path must reference a workspace-relative file or directory");
+  }
+  if (path.isAbsolute(userPath)) {
+    fail("PATH_OUTSIDE_WORKSPACE", "Absolute paths are not allowed");
+  }
+
+  const rootRealPath = await realpath(workspace.rootPath);
+  const absolutePath = path.resolve(rootRealPath, userPath);
+  if (!isInside(rootRealPath, absolutePath)) {
+    fail("PATH_OUTSIDE_WORKSPACE", "Path escapes workspace root");
+  }
+
+  const relativePath = normalizeRelative(path.relative(rootRealPath, absolutePath));
+  if (relativePath === "." || relativePath.startsWith("../")) {
+    fail("PATH_OUTSIDE_WORKSPACE", "Path escapes workspace root");
+  }
+  if (isIgnored(workspace, relativePath)) {
+    fail("PATH_IGNORED", "Path is ignored", { path: relativePath });
+  }
+
+  return { rootRealPath, absolutePath, relativePath };
 }
 
 export async function safeLstat(filePath: string) {
