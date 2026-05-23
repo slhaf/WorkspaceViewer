@@ -24,10 +24,25 @@ export async function callWorkspaceTool(
   if (name === "listWorkspaces") {
     const input = inputSchemas.listWorkspaces.parse(args);
     const rows = await listWorkspacesForUser(env.DB, userId);
+    console.log("listWorkspaces DB result", {
+      workspaceCount: rows.length
+    });
     const uniqueAgentIds = [...new Set(rows.map((row) => row.agent_id))];
+    console.log("listWorkspaces online probes", {
+      agentCount: uniqueAgentIds.length
+    });
     const onlineByAgent = new Map<string, boolean>();
     await Promise.all(uniqueAgentIds.map(async (agentId) => {
-      onlineByAgent.set(agentId, await env.AGENT_SESSION.getByName(agentId).isOnline());
+      try {
+        onlineByAgent.set(agentId, await env.AGENT_SESSION.getByName(agentId).isOnline());
+      } catch (error) {
+        console.error("listWorkspaces online probe failed", {
+          agentId,
+          errorType: error instanceof Error ? error.name : typeof error,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        throw error;
+      }
     }));
 
     const workspaces = rows

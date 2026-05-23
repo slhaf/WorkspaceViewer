@@ -77,7 +77,38 @@ const defaultHandler: ExportedHandler<Env> = {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return oauthProvider(env, request).fetch(request, env, ctx);
+    const url = new URL(request.url);
+    const shouldLog = shouldLogRequest(url.pathname);
+    if (shouldLog) {
+      console.log("HTTP request", {
+        method: request.method,
+        pathname: url.pathname,
+        userAgent: request.headers.get("user-agent") ?? "",
+        hasAuthorization: request.headers.has("authorization")
+      });
+    }
+
+    try {
+      const response = await oauthProvider(env, request).fetch(request, env, ctx);
+      if (shouldLog) {
+        console.log("HTTP response", {
+          method: request.method,
+          pathname: url.pathname,
+          status: response.status
+        });
+      }
+      return response;
+    } catch (error) {
+      if (shouldLog) {
+        console.error("HTTP unhandled error", {
+          method: request.method,
+          pathname: url.pathname,
+          errorType: error instanceof Error ? error.name : typeof error,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+      throw error;
+    }
   },
 
   async scheduled(_event: ScheduledController, env: Env): Promise<void> {
@@ -99,6 +130,13 @@ function oauthProvider(env: Env, request?: Request): OAuthProvider<Env> {
     defaultHandler,
     scopesSupported: [OAUTH_SCOPE],
     allowPlainPKCE: true,
+    onError: ({ status, code, description }) => {
+      console.warn("OAuth error response", {
+        status,
+        code,
+        description
+      });
+    },
     resourceMetadata: {
       resource: mcpResourceUrl,
       authorization_servers: [baseUrl],
@@ -111,6 +149,12 @@ function oauthProvider(env: Env, request?: Request): OAuthProvider<Env> {
 
 function publicBaseUrl(env: Env, request?: Request): string {
   return (env.PUBLIC_BASE_URL ?? (request ? new URL(request.url).origin : "http://localhost:8787")).replace(/\/$/, "");
+}
+
+function shouldLogRequest(pathname: string): boolean {
+  return pathname === "/authorize"
+    || pathname === "/token"
+    || pathname.startsWith("/actions/v1/");
 }
 
 function openAiAppsChallenge(env: Env): Response {

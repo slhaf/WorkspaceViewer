@@ -31,11 +31,27 @@ export async function handleActionsApi(request: Request, env: Env, props?: OAuth
         return json({ error: { code: "AUTHENTICATION_REQUIRED", message: "Authentication required" } }, 401);
     }
 
+    console.log("Action start", {
+        toolName,
+        pathname: url.pathname,
+        hasUserId: true
+    });
+
     try {
         const input = await readJson(request);
         const result = await callWorkspaceTool(env, userId, toolName, input);
-        return json(trimForActions(result));
+        const response = json(trimForActions(result));
+        console.log("Action success", {
+            toolName,
+            status: response.status
+        });
+        return response;
     } catch (error) {
+        console.error("Action failure", {
+            toolName,
+            errorType: error instanceof Error ? error.name : typeof error,
+            message: error instanceof Error ? error.message : String(error)
+        });
         if (error instanceof SyntaxError) {
             return json({ error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } }, 400);
         }
@@ -87,7 +103,7 @@ export function actionOpenApi(request: Request, env: Env): Response {
                 summary: "Create a temporary local Agent pairing code",
                 requestSchema: "CreateAgentPairingCodeInput",
                 responseSchema: "CreateAgentPairingCodeResult",
-                consequential: false
+                consequential: true
             }),
             "/actions/v1/list-workspaces": postOperation({
                 operationId: "listWorkspaces",

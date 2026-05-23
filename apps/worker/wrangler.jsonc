@@ -40,6 +40,6 @@
         "OAUTH_BOOTSTRAP_DEV_WORKSPACE_ON_FIRST_LOGIN": "false",
         "REVIEW_LOGIN_ENABLED": "true",
         "ACTION_OAUTH_CLIENT_ID": "workspace-viewer-gpt-action",
-        "ACTION_OAUTH_REDIRECT_URIS": "https://chat.openai.com/aip/g-aadc2963793805690839a74668f8a907b85f897e/oauth/callback"
+        "ACTION_OAUTH_REDIRECT_URIS": "https://chat.openai.com/aip/g-aadc2963793805690839a74668f8a907b85f897e/oauth/callback,https://chatgpt.com/aip/g-aadc2963793805690839a74668f8a907b85f897e/oauth/callback"
     }
 }
