@@ -44,6 +44,21 @@ describe("protocol schemas", () => {
     })).toThrow();
   });
 
+  it("accepts Git operations inside batchExec", () => {
+    const parsed = batchExecInputSchema.parse({
+      workspaceId: "ws",
+      operations: [
+        { id: "changes", tool: "describeWorkspaceChanges", input: { maxFiles: 5 } },
+        { id: "diff", tool: "inspectWorkspaceDiff", input: { path: "src/index.ts", maxBytes: 1024 } }
+      ]
+    });
+
+    expect(parsed.operations.map((operation) => operation.tool)).toEqual([
+      "describeWorkspaceChanges",
+      "inspectWorkspaceDiff"
+    ]);
+  });
+
   it("validates standard workspace errors", () => {
     expect(workspaceToolErrorSchema.parse({
       code: "PATH_OUTSIDE_WORKSPACE",

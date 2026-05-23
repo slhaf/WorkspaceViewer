@@ -87,7 +87,16 @@ const toolInputSchemas: Record<string, JsonSchema> = {
             fileGlob: { type: "array", items: { type: "string" } },
             maxResults: { type: "integer", minimum: 1, maximum: LIMITS.searchFile.maxResults },
             contextLines: { type: "integer", minimum: 0, maximum: LIMITS.searchFile.maxContextLines }
-          }, ["mode", "query"]))
+          }, ["mode", "query"])),
+          batchOperationSchema("describeWorkspaceChanges", objectSchema({
+            includeUntracked: { type: "boolean" },
+            maxFiles: { type: "integer", minimum: 1, maximum: LIMITS.gitStatus.maxFiles }
+          })),
+          batchOperationSchema("inspectWorkspaceDiff", objectSchema({
+            path: { type: "string" },
+            staged: { type: "boolean" },
+            maxBytes: { type: "integer", minimum: 1, maximum: LIMITS.gitDiff.maxBytes }
+          }))
         ]
       }
     }

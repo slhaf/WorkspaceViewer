@@ -262,43 +262,6 @@ export const searchFileResultSchema = z.discriminatedUnion("mode", [
   searchContentResultSchema
 ]);
 
-export const batchOperationSchema = z.discriminatedUnion("tool", [
-  z.object({
-    id: z.string().min(1),
-    tool: z.literal("describeWorkspace"),
-    input: describeWorkspaceInputSchema.omit({ workspaceId: true })
-  }),
-  z.object({
-    id: z.string().min(1),
-    tool: z.literal("listTree"),
-    input: listTreeInputSchema.omit({ workspaceId: true })
-  }),
-  z.object({
-    id: z.string().min(1),
-    tool: z.literal("inspectFile"),
-    input: inspectFileInputSchema.omit({ workspaceId: true })
-  }),
-  z.object({
-    id: z.string().min(1),
-    tool: z.literal("searchFile"),
-    input: searchFileInputSchema.omit({ workspaceId: true })
-  })
-]);
-
-export const batchExecInputSchema = z.object({
-  workspaceId: z.string(),
-  operations: z.array(batchOperationSchema).min(1).max(LIMITS.batchExec.maxOperations)
-});
-
-export const batchExecResultSchema = z.object({
-  results: z.array(z.object({
-    id: z.string(),
-    ok: z.boolean(),
-    result: z.unknown().optional(),
-    error: workspaceToolErrorSchema.optional()
-  }))
-});
-
 export const describeWorkspaceChangesInputSchema = z.object({
   workspaceId: z.string(),
   includeUntracked: z.boolean().optional(),
@@ -344,6 +307,53 @@ export const inspectWorkspaceDiffResultSchema = z.object({
   staged: z.boolean(),
   diff: z.string(),
   truncated: z.boolean()
+});
+
+export const batchOperationSchema = z.discriminatedUnion("tool", [
+  z.object({
+    id: z.string().min(1),
+    tool: z.literal("describeWorkspace"),
+    input: describeWorkspaceInputSchema.omit({ workspaceId: true })
+  }),
+  z.object({
+    id: z.string().min(1),
+    tool: z.literal("listTree"),
+    input: listTreeInputSchema.omit({ workspaceId: true })
+  }),
+  z.object({
+    id: z.string().min(1),
+    tool: z.literal("inspectFile"),
+    input: inspectFileInputSchema.omit({ workspaceId: true })
+  }),
+  z.object({
+    id: z.string().min(1),
+    tool: z.literal("searchFile"),
+    input: searchFileInputSchema.omit({ workspaceId: true })
+  }),
+  z.object({
+    id: z.string().min(1),
+    tool: z.literal("describeWorkspaceChanges"),
+    input: describeWorkspaceChangesInputSchema.omit({ workspaceId: true })
+  }),
+  z.object({
+    id: z.string().min(1),
+    tool: z.literal("inspectWorkspaceDiff"),
+    input: inspectWorkspaceDiffInputSchema.omit({ workspaceId: true })
+  })
+]);
+
+export const batchExecInputSchema = z.object({
+  workspaceId: z.string(),
+  operations: z.array(batchOperationSchema).min(1).max(LIMITS.batchExec.maxOperations)
+});
+
+export const batchExecResultSchema = z.object({
+  results: z.array(z.object({
+    id: z.string(),
+    ok: z.boolean(),
+    result: z.unknown().optional(),
+    error: workspaceToolErrorSchema.optional()
+  }))
 });
 
 export const context7ResolveLibraryIdInputSchema = z.object({

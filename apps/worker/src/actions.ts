@@ -290,6 +290,14 @@ function objectSchema(properties: Record<string, unknown> = {}, required: string
     };
 }
 
+function batchOperationSchema(tool: string, input: Record<string, unknown>): Record<string, unknown> {
+    return objectSchema({
+        id: { type: "string", minLength: 1 },
+        tool: { type: "string", const: tool },
+        input
+    }, ["id", "tool", "input"]);
+}
+
 function actionSchemas(): Record<string, unknown> {
     const workspaceId = { type: "string", description: "Workspace ID returned by listWorkspaces." };
     return {
@@ -402,7 +410,38 @@ function actionSchemas(): Record<string, unknown> {
                 type: "array",
                 minItems: 1,
                 maxItems: LIMITS.batchExec.maxOperations,
-                items: { type: "object", additionalProperties: true }
+                items: {
+                    oneOf: [
+                        batchOperationSchema("describeWorkspace", objectSchema()),
+                        batchOperationSchema("listTree", objectSchema({
+                            path: { type: "string" },
+                            depth: { type: "integer", minimum: 0, maximum: LIMITS.listTree.maxDepth },
+                            includeFiles: { type: "boolean" }
+                        })),
+                        batchOperationSchema("inspectFile", objectSchema({
+                            path: { type: "string" },
+                            startLine: { type: "integer", minimum: 1 },
+                            endLine: { type: "integer", minimum: 1 }
+                        }, ["path"])),
+                        batchOperationSchema("searchFile", objectSchema({
+                            mode: { type: "string", enum: ["path", "content"] },
+                            query: { type: "string", minLength: 1, maxLength: LIMITS.searchFile.maxQueryLength },
+                            pathPrefix: { type: "string" },
+                            fileGlob: { type: "array", items: { type: "string" } },
+                            maxResults: { type: "integer", minimum: 1, maximum: LIMITS.searchFile.maxResults },
+                            contextLines: { type: "integer", minimum: 0, maximum: LIMITS.searchFile.maxContextLines }
+                        }, ["mode", "query"])),
+                        batchOperationSchema("describeWorkspaceChanges", objectSchema({
+                            includeUntracked: { type: "boolean" },
+                            maxFiles: { type: "integer", minimum: 1, maximum: LIMITS.gitStatus.maxFiles }
+                        })),
+                        batchOperationSchema("inspectWorkspaceDiff", objectSchema({
+                            path: { type: "string" },
+                            staged: { type: "boolean" },
+                            maxBytes: { type: "integer", minimum: 1, maximum: LIMITS.gitDiff.maxBytes }
+                        }))
+                    ]
+                }
             }
         }, ["workspaceId", "operations"]),
         BatchExecResult: objectSchema({

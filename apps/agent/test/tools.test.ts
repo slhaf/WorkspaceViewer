@@ -90,6 +90,37 @@ describe("agent tools", () => {
     expect(result.results[1]).toMatchObject({ id: "bad", ok: false, error: { code: "FILE_NOT_FOUND" } });
   });
 
+  it("runs Git status and diff operations in batch", async () => {
+    const { config, root } = await makeConfig();
+    await git(root, "init");
+    await git(root, "config", "user.email", "test@example.com");
+    await git(root, "config", "user.name", "Test User");
+    await git(root, "add", "src/index.ts");
+    await git(root, "commit", "-m", "initial");
+    await writeFile(path.join(root, "src", "index.ts"), "alpha\nbatched\nomega\n");
+
+    const result = await executeTool(config, "batchExec", {
+      workspaceId: "ws_dev",
+      operations: [
+        { id: "changes", tool: "describeWorkspaceChanges", input: { includeUntracked: true } },
+        { id: "diff", tool: "inspectWorkspaceDiff", input: { path: "src/index.ts" } }
+      ]
+    }) as {
+      results: Array<{ id: string; ok: boolean; result?: { files?: Array<{ path: string }>; diff?: string } }>;
+    };
+
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0]).toMatchObject({ id: "changes", ok: true });
+    expect(result.results[0]?.result?.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "src/index.ts" })
+    ]));
+    expect(result.results[1]).toMatchObject({
+      id: "diff",
+      ok: true
+    });
+    expect(result.results[1]?.result?.diff).toContain("+batched");
+  });
+
   it("returns non-Git status without throwing", async () => {
     const { config } = await makeConfig();
     const result = await executeTool(config, "describeWorkspaceChanges", {
