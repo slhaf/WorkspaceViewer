@@ -18,7 +18,21 @@ export class AgentClient {
   private sendQueue: Promise<void> = Promise.resolve();
   private stopped = false;
 
-  constructor(private readonly config: PairedAgentConfig) {}
+  constructor(private config: PairedAgentConfig) {}
+
+  updateConfig(config: PairedAgentConfig): void {
+    const reconnectRequired =
+      config.agent.agentId !== this.config.agent.agentId ||
+      config.agent.agentToken !== this.config.agent.agentToken ||
+      config.agent.serverBaseUrl !== this.config.agent.serverBaseUrl;
+    this.config = config;
+    if (reconnectRequired) {
+      console.error("Agent pairing changed; reconnecting with updated credentials.");
+      this.socket?.close();
+      return;
+    }
+    this.sendWorkspaceSync();
+  }
 
   async run(): Promise<void> {
     while (!this.stopped) {
@@ -55,14 +69,7 @@ export class AgentClient {
         this.sendControl({
           type: "agent_hello",
           agentId: this.config.agent.agentId,
-          workspaces: this.config.workspaces.map((workspace) => {
-            const summary = {
-              workspaceId: workspace.workspaceId,
-              displayName: workspace.displayName,
-              accessMode: workspace.accessMode
-            };
-            return workspace.languages ? { ...summary, languages: workspace.languages } : summary;
-          })
+          workspaces: workspaceSummaries(this.config)
         });
       });
 
@@ -156,6 +163,25 @@ export class AgentClient {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(message));
   }
+
+  private sendWorkspaceSync(): void {
+    this.sendControl({
+      type: "workspace_sync",
+      agentId: this.config.agent.agentId,
+      workspaces: workspaceSummaries(this.config)
+    });
+  }
+}
+
+function workspaceSummaries(config: PairedAgentConfig): AgentControlMessage["workspaces"] {
+  return config.workspaces.map((workspace) => {
+    const summary = {
+      workspaceId: workspace.workspaceId,
+      displayName: workspace.displayName,
+      accessMode: workspace.accessMode
+    };
+    return workspace.languages ? { ...summary, languages: workspace.languages } : summary;
+  });
 }
 
 function createProxyAgent(url: URL): HttpsProxyAgent<string> | undefined {

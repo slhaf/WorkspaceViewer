@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
+import { watch, type FSWatcher } from "node:fs";
 import { realpath } from "node:fs/promises";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { completeAgentPairingResponseSchema, unpairAgentResponseSchema } from "@workspace-viewer/protocol";
 import { AgentClient } from "./client.js";
@@ -11,6 +13,7 @@ import {
   loadConfig,
   saveConfig
 } from "./config.js";
+import { acquireAgentRunLock } from "./runLock.js";
 
 export const WORKSPACE_VIEWER_MCP_URL = "https://workspace-viewer.slhafzjw-workspace-viewer.workers.dev/mcp";
 
@@ -41,10 +44,58 @@ async function runAgent(args: string[]): Promise<void> {
   if (!config.agent) {
     throw new Error("Agent is not paired. Run `workspace-viewer-agent pair <pairing-code>` first.");
   }
-  const client = new AgentClient({ ...config, agent: config.agent });
-  process.on("SIGINT", () => client.stop());
-  process.on("SIGTERM", () => client.stop());
-  await client.run();
+  const lock = await acquireAgentRunLock(configPath);
+  try {
+    const client = new AgentClient({ ...config, agent: config.agent });
+    const watcher = watchConfig(configPath, client);
+    process.on("SIGINT", () => client.stop());
+    process.on("SIGTERM", () => client.stop());
+    try {
+      await client.run();
+    } finally {
+      watcher.close();
+    }
+  } finally {
+    await lock.release();
+  }
+}
+
+function watchConfig(configPath: string, client: AgentClient): FSWatcher {
+  const resolvedConfigPath = path.resolve(configPath);
+  const configDir = path.dirname(resolvedConfigPath);
+  const configName = path.basename(resolvedConfigPath);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watcher = watch(configDir, (eventType, filename) => {
+    if (filename && !isConfigWriteEvent(filename.toString(), configName)) return;
+    if (eventType !== "change" && eventType !== "rename") return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      void reloadConfig(resolvedConfigPath, client);
+    }, 250);
+  });
+  watcher.on("error", (error) => {
+    console.error(`Workspace Viewer Agent config watcher error: ${error.message}`);
+  });
+  return watcher;
+}
+
+export function isConfigWriteEvent(filename: string, configName: string): boolean {
+  return filename === configName || filename.startsWith(`${configName}.`);
+}
+
+async function reloadConfig(configPath: string, client: AgentClient): Promise<void> {
+  try {
+    const config = await loadConfig(configPath);
+    if (!config.agent) {
+      console.error("Workspace Viewer Agent config changed but is not paired; keeping current running config.");
+      return;
+    }
+    client.updateConfig({ ...config, agent: config.agent });
+    console.error(`Workspace Viewer Agent config reloaded: ${config.workspaces.length} workspace(s) synced.`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Workspace Viewer Agent config reload failed; keeping current running config: ${message}`);
+  }
 }
 
 type Fetch = typeof fetch;
@@ -370,7 +421,7 @@ async function loadConfigIfExists(configPath: string): Promise<AgentConfig | nul
 }
 
 function printRestartNotice(): void {
-  console.log("Restart the agent to sync workspace metadata.");
+  console.log("Running agents will sync workspace metadata automatically.");
 }
 
 function workspaceUsage(): void {

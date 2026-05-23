@@ -2,7 +2,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { pair, unpair, WORKSPACE_VIEWER_MCP_URL } from "../src/cli.js";
+import { isConfigWriteEvent, pair, unpair, WORKSPACE_VIEWER_MCP_URL } from "../src/cli.js";
 import { loadConfig, saveConfig } from "../src/config.js";
 
 describe("agent cli pairing", () => {
@@ -109,5 +109,11 @@ describe("agent cli pairing", () => {
     await expect(unpair(["--config", configPath], fetchFn, () => undefined)).rejects.toThrow("Unpair failed");
 
     expect(await readFile(configPath, "utf8")).toBe(before);
+  });
+
+  it("treats atomic config temp-file writes as config changes", () => {
+    expect(isConfigWriteEvent("config.json", "config.json")).toBe(true);
+    expect(isConfigWriteEvent("config.json.123.tmp", "config.json")).toBe(true);
+    expect(isConfigWriteEvent("other.json", "config.json")).toBe(false);
   });
 });
